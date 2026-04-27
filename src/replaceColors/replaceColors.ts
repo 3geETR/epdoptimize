@@ -1,3 +1,4 @@
+import type { CanvasLike } from "../dither/dither";
 import type { PaletteColorEntry } from "../dither/functions/palette-order";
 
 type RGB = [number, number, number];
@@ -64,8 +65,8 @@ const createReplacementMap = (
 };
 
 export const replaceColors = (
-  fromCanvas: HTMLCanvasElement,
-  destCanvas: HTMLCanvasElement,
+  fromCanvas: CanvasLike,
+  destCanvas: CanvasLike,
   palette: ReplaceColorsPalette | ReplaceColorsOptions
 ) => {
   const fromCtx = fromCanvas.getContext("2d");
