@@ -18,6 +18,12 @@ import type {
   ProcessingSuggestion,
 } from "../src";
 
+/**
+ * This is a demo page for testing and showcasing the capabilities of the library.
+ * It is not intended to be an example of how to structure an application using the library :)
+ * The code is not optimized for readability or maintainability.
+ **/
+
 const $ = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 
@@ -90,7 +96,7 @@ const dynamicRangeStrengthInput = $("dynamicRangeStrength") as HTMLInputElement;
 const lowPercentileInput = $("lowPercentile") as HTMLInputElement;
 const highPercentileInput = $("highPercentile") as HTMLInputElement;
 
-type ScreenOrientation = "landscape" | "portrait";
+type ScreenOrientation = "landscape" | "portrait" | "original";
 type ImageFitMode = "contain" | "cover";
 type DynamicRangeMode = "off" | "display" | "auto";
 type ToneMappingMode = "off" | "contrast" | "scurve";
@@ -340,7 +346,20 @@ function getSelectedScreenResolution() {
 }
 
 function getSelectedOrientation(): ScreenOrientation {
+  if (orientationSelect.value === "original") return "original";
   return orientationSelect.value === "portrait" ? "portrait" : "landscape";
+}
+
+function getOriginalImageOrientation(img: HTMLImageElement): ScreenOrientation {
+  return img.height > img.width ? "portrait" : "landscape";
+}
+
+function getDeviceUploadOrientation(): Exclude<ScreenOrientation, "original"> {
+  const orientation = getSelectedOrientation();
+  if (orientation !== "original") return orientation;
+  return lastImage && lastImage.height > lastImage.width
+    ? "portrait"
+    : "landscape";
 }
 
 function getSelectedImageFit(): ImageFitMode {
@@ -358,8 +377,8 @@ function loadDeviceTestConfig() {
         ? saved.screenResolution
         : DEFAULT_DEVICE_TEST_CONFIG.screenResolution;
     orientationSelect.value =
-      saved.orientation === "portrait"
-        ? "portrait"
+      saved.orientation === "portrait" || saved.orientation === "original"
+        ? saved.orientation
         : DEFAULT_DEVICE_TEST_CONFIG.orientation;
     imageFitSelect.value =
       saved.imageFit === "cover"
@@ -417,6 +436,19 @@ function drawImageToScreenCanvas(
   const ctx = canvas.getContext("2d")!;
   const orientation = getSelectedOrientation();
   const imageFit = getSelectedImageFit();
+
+  if (orientation === "original") {
+    const originalOrientation = getOriginalImageOrientation(img);
+    const canvasWidth = originalOrientation === "portrait" ? height : width;
+    const canvasHeight = originalOrientation === "portrait" ? width : height;
+
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    drawImageWithFit(img, ctx, canvasWidth, canvasHeight, imageFit);
+    return;
+  }
 
   canvas.width = width;
   canvas.height = height;
@@ -503,7 +535,7 @@ async function testOnDevice() {
       "settings",
       JSON.stringify({
         meta: {
-          orientation: getSelectedOrientation(),
+          orientation: getDeviceUploadOrientation(),
         },
       }),
     );
@@ -542,6 +574,23 @@ function setInputValue(input: HTMLInputElement, value: number | undefined) {
   if (typeof value === "number") input.value = String(value);
 }
 
+function setResolvedInputValue(
+  input: HTMLInputElement,
+  value: number | undefined,
+  fallback: number,
+) {
+  input.value = String(value ?? fallback);
+}
+
+function setSelectValue(select: HTMLSelectElement, value: string | undefined) {
+  if (
+    typeof value === "string" &&
+    Array.from(select.options).some((option) => option.value === value)
+  ) {
+    select.value = value;
+  }
+}
+
 function applyPresetToUI(name: string) {
   if (name === "auto") return;
 
@@ -567,6 +616,77 @@ function applyPresetToUI(name: string) {
   if (preset.errorDiffusionMatrix) {
     errorDiffusionMatrixSelect.value = preset.errorDiffusionMatrix;
   }
+}
+
+function applyResolvedDitherOptionsToUI(options: Partial<DitherImageOptions>) {
+  const preset =
+    typeof options.processingPreset === "string"
+      ? getProcessingPreset(options.processingPreset)
+      : null;
+  const toneMapping = options.toneMapping ?? preset?.toneMapping;
+  const dynamicRangeCompression =
+    typeof options.dynamicRangeCompression === "object"
+      ? options.dynamicRangeCompression
+      : preset?.dynamicRangeCompression;
+
+  setSelectValue(
+    ditheringTypeSelect,
+    options.ditheringType ?? DEFAULT_DITHER_OPTIONS.ditheringType,
+  );
+  setSelectValue(
+    errorDiffusionMatrixSelect,
+    options.errorDiffusionMatrix ??
+      preset?.errorDiffusionMatrix ??
+      DEFAULT_DITHER_OPTIONS.errorDiffusionMatrix,
+  );
+  setSelectValue(
+    randomDitheringTypeSelect,
+    options.randomDitheringType ?? DEFAULT_DITHER_OPTIONS.randomDitheringType,
+  );
+  serpentineCheckbox.checked =
+    options.serpentine ?? DEFAULT_DITHER_OPTIONS.serpentine;
+  setSelectValue(
+    colorMatchingSelect,
+    options.colorMatching ??
+      preset?.colorMatching ??
+      DEFAULT_DITHER_OPTIONS.colorMatching,
+  );
+
+  const orderedDitheringMatrix =
+    options.orderedDitheringMatrix ??
+    DEFAULT_DITHER_OPTIONS.orderedDitheringMatrix;
+  orderedDitheringMatrixW.value = String(orderedDitheringMatrix[0] ?? 4);
+  orderedDitheringMatrixH.value = String(orderedDitheringMatrix[1] ?? 4);
+
+  toneModeSelect.value = toneMapping?.mode ?? "off";
+  setResolvedInputValue(exposureInput, toneMapping?.exposure, 1);
+  setResolvedInputValue(saturationInput, toneMapping?.saturation, 1);
+  setResolvedInputValue(contrastInput, toneMapping?.contrast, 1);
+  setResolvedInputValue(scurveStrengthInput, toneMapping?.strength, 0.9);
+  setResolvedInputValue(shadowBoostInput, toneMapping?.shadowBoost, 0);
+  setResolvedInputValue(
+    highlightCompressInput,
+    toneMapping?.highlightCompress,
+    1.5,
+  );
+  setResolvedInputValue(midpointInput, toneMapping?.midpoint, 0.5);
+
+  dynamicRangeModeSelect.value = dynamicRangeCompression?.mode ?? "off";
+  setResolvedInputValue(
+    dynamicRangeStrengthInput,
+    dynamicRangeCompression?.strength,
+    1,
+  );
+  setResolvedInputValue(
+    lowPercentileInput,
+    dynamicRangeCompression?.lowPercentile,
+    0.01,
+  );
+  setResolvedInputValue(
+    highPercentileInput,
+    dynamicRangeCompression?.highPercentile,
+    0.99,
+  );
 }
 
 function readNumber(input: HTMLInputElement, fallback: number) {
@@ -1035,8 +1155,12 @@ async function processImage() {
     inputCanvas,
     palette,
   );
+  if (processingPresetSelect.value === "auto") {
+    applyResolvedDitherOptionsToUI(currentProcessingSuggestion.ditherOptions);
+  }
   updateImageStyleResult(currentProcessingSuggestion.classification);
   updateAutoRecommendation(currentProcessingSuggestion);
+  refreshControlState();
   updateConfigOutput();
 
   const options =

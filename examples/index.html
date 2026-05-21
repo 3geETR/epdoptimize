@@ -255,6 +255,17 @@
         transition: width 160ms ease;
       }
 
+      .image-style-details {
+        padding-top: 0.15rem;
+      }
+
+      .image-style-details summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.35;
+      }
+
       .image-style-metrics {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -378,8 +389,17 @@
 
       .workspace-tools {
         display: flex;
+        flex-wrap: wrap;
+        align-items: end;
         justify-content: flex-end;
+        gap: 0.75rem;
         margin-bottom: 1rem;
+      }
+
+      .workspace-control {
+        display: grid;
+        gap: 0.25rem;
+        min-width: min(12rem, 100%);
       }
 
       .preview {
@@ -628,7 +648,10 @@
                   <span id="imageStyleMeter"></span>
                 </div>
               </div>
-              <dl id="imageStyleMetrics" class="image-style-metrics"></dl>
+              <details class="image-style-details">
+                <summary>Details</summary>
+                <dl id="imageStyleMetrics" class="image-style-metrics"></dl>
+              </details>
             </div>
           </fieldset>
 
@@ -657,66 +680,6 @@
                   class="palette-strip"
                   aria-label="Selected device colors"
                 ></div>
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend><h3>Device Test</h3></legend>
-            <div class="control-grid">
-              <div class="control">
-                <label for="screenResolutionSelect">Screen</label>
-                <select id="screenResolutionSelect">
-                  <option value="openpaper7">
-                    7.3 Inch OpenPaper 7 - 800 x 480
-                  </option>
-                  <option value="openpaperL">
-                    13.3 Inch OpenPaper L - 1600 x 1200
-                  </option>
-                </select>
-              </div>
-              <div class="control">
-                <label for="orientationSelect">Orientation</label>
-                <select id="orientationSelect">
-                  <option value="landscape">Landscape</option>
-                  <option value="portrait">Portrait</option>
-                </select>
-              </div>
-              <div class="control">
-                <label for="imageFitSelect">Image fit</label>
-                <select id="imageFitSelect">
-                  <option value="contain">Contain</option>
-                  <option value="cover">Cover</option>
-                </select>
-              </div>
-              <div class="control full">
-                <label for="paperIdInput">Paper ID</label>
-                <input
-                  type="text"
-                  id="paperIdInput"
-                  autocomplete="off"
-                  spellcheck="false"
-                />
-              </div>
-              <div class="control full">
-                <label for="apiKeyInput">x-api-key</label>
-                <input
-                  type="password"
-                  id="apiKeyInput"
-                  autocomplete="off"
-                  spellcheck="false"
-                />
-              </div>
-              <div class="control full action-row">
-                <button id="testOnDeviceButton" class="button" type="button">
-                  Test on device
-                </button>
-                <p
-                  id="deviceTestStatus"
-                  class="status-line"
-                  role="status"
-                  aria-live="polite"
-                ></p>
               </div>
             </div>
           </fieldset>
@@ -1037,11 +1000,72 @@
               aria-label="Current JavaScript example"
             ></pre>
           </fieldset>
+
+          <fieldset>
+            <legend><h3>Device Test</h3></legend>
+            <div class="control-grid">
+              <div class="control full">
+                <label for="paperIdInput">Paper ID</label>
+                <input
+                  type="text"
+                  id="paperIdInput"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
+              <div class="control full">
+                <label for="apiKeyInput">x-api-key</label>
+                <input
+                  type="password"
+                  id="apiKeyInput"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
+              <div class="control full action-row">
+                <button id="testOnDeviceButton" class="button" type="button">
+                  Test on device
+                </button>
+                <p
+                  id="deviceTestStatus"
+                  class="status-line"
+                  role="status"
+                  aria-live="polite"
+                ></p>
+              </div>
+            </div>
+          </fieldset>
         </div>
       </aside>
 
       <section class="workspace" aria-label="Image previews">
         <div class="workspace-tools">
+          <div class="workspace-control">
+            <label for="screenResolutionSelect">Screen</label>
+            <select id="screenResolutionSelect">
+              <option value="openpaper7">
+                7.3 Inch OpenPaper 7 - 800 x 480
+              </option>
+              <option value="openpaperL">
+                13.3 Inch OpenPaper L - 1600 x 1200
+              </option>
+            </select>
+          </div>
+          <div class="workspace-control">
+            <label for="orientationSelect">Orientation</label>
+            <select id="orientationSelect">
+              <option value="original">Original</option>
+              <option value="landscape">Landscape</option>
+              <option value="portrait">Portrait</option>
+            </select>
+          </div>
+          <div class="workspace-control">
+            <label for="imageFitSelect">Image fit</label>
+            <select id="imageFitSelect">
+              <option value="contain">Contain</option>
+              <option value="cover">Cover</option>
+            </select>
+          </div>
           <button
             id="toggleOriginalSizeButton"
             class="button"
