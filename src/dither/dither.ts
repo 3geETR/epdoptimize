@@ -8,11 +8,14 @@ import colorHelpers from "./functions/color-helpers";
 // import colorPaletteFromImage from "./functions/color-palette-from-image";
 import utilities from "./functions/utilities";
 import findClosestPaletteColor from "./functions/find-closest-palette-color";
+import { applyWasmRgbErrorDiffusion } from "./wasm-error-diffusion-rgb";
 import {
   applyImageProcessing,
   clampByte,
+  deltaE,
   getProcessingPreset,
   luma709,
+  rgbToLab,
   toRGB,
   toScalar,
   type ColorMatchingMode,
@@ -21,6 +24,7 @@ import {
   type LevelCompressionMode,
   type LevelCompressionOptions,
   type LevelRGB,
+  type PaperNormalizationOptions,
   type PercentileClip,
   type ProcessingPreset,
   type ProcessingPresetName,
@@ -43,6 +47,8 @@ export type DitheringType =
   | "hueMix"
   | (string & {});
 
+export type DitherProcessingEngine = "js" | "wasm" | "auto";
+
 export interface DitherImageOptions {
   /**
    * Upstream-style processing preset. Presets fill in tone mapping, dynamic
@@ -52,6 +58,14 @@ export interface DitherImageOptions {
 
   /** Main dithering algorithm. */
   ditheringType?: DitheringType;
+
+  /**
+   * Processing engine for supported hot paths.
+   *
+   * Default: "js". "wasm" and "auto" currently accelerate RGB error diffusion
+   * and fall back to JS for unsupported modes.
+   */
+  processingEngine?: DitherProcessingEngine;
 
   /** Error diffusion kernel (e.g. `floydSteinberg`). */
   errorDiffusionMatrix?: string;
@@ -98,6 +112,11 @@ export interface DitherImageOptions {
    * LAB lightness compression into the calibrated display black/white range.
    */
   dynamicRangeCompression?: DynamicRangeCompressionOptions | boolean;
+
+  /**
+   * Selective cleanup for scanned paper/poster sources before tone mapping.
+   */
+  paperNormalization?: PaperNormalizationOptions;
 }
 
 export interface ImageDataLike {
@@ -124,6 +143,7 @@ export type {
   LevelCompressionMode,
   LevelCompressionOptions,
   LevelRGB,
+  PaperNormalizationOptions,
   PercentileClip,
   ProcessingPreset,
   ProcessingPresetName,
@@ -290,12 +310,16 @@ const mergeImageProcessingOptions = (
   options: DitherImageOptions & typeof defaultOptions
 ): ImageProcessingOptions | undefined => {
   const hasToneMapping = options.toneMapping !== undefined;
+  const hasPaperNormalization = options.paperNormalization !== undefined;
   const hasDynamicRangeCompression =
     options.dynamicRangeCompression !== undefined;
 
-  if (!hasToneMapping && !hasDynamicRangeCompression) return undefined;
+  if (!hasPaperNormalization && !hasToneMapping && !hasDynamicRangeCompression) {
+    return undefined;
+  }
 
   return {
+    paperNormalization: options.paperNormalization,
     toneMapping: options.toneMapping,
     dynamicRangeCompression: options.dynamicRangeCompression,
   };
@@ -307,6 +331,7 @@ const getPresetDefaults = (presetName: ProcessingPresetName | undefined) => {
   if (!preset) return {};
 
   return {
+    paperNormalization: preset.paperNormalization,
     toneMapping: preset.toneMapping,
     dynamicRangeCompression: preset.dynamicRangeCompression,
     colorMatching: preset.colorMatching,
@@ -434,15 +459,30 @@ const ditherImage = async (
   }
 
   if (options.ditheringType === "errorDiffusion") {
-    applyErrorDiffusion(
-      image,
-      width,
-      height,
-      colorPalette,
-      options.errorDiffusionMatrix,
-      options.colorMatching,
-      options.serpentine
-    );
+    const diffusionMap = getDiffusionMap(options.errorDiffusionMatrix);
+    const usedWasm =
+      shouldUseWasmErrorDiffusion(
+        options.processingEngine,
+        options.colorMatching
+      ) &&
+      (await applyWasmRgbErrorDiffusion(
+        image,
+        colorPalette,
+        diffusionMap,
+        options.serpentine
+      ));
+
+    if (!usedWasm) {
+      applyErrorDiffusion(
+        image,
+        width,
+        height,
+        colorPalette,
+        diffusionMap,
+        options.colorMatching,
+        options.serpentine
+      );
+    }
   }
 
   return imageDataToCanvas(image, canvas);
@@ -460,29 +500,106 @@ const getPixelColorValues = (
   ];
 };
 
-const getQuantError = (oldPixel: RGBA, newPixel: RGBA): RGBA => {
-  //const maxValue = 255
-  const quant = oldPixel.map((color, i) => {
-    return color - newPixel[i];
-  });
-
-  return quant as RGBA;
-};
-
-const addQuantError = (
-  pixel: RGBA,
-  quantError: RGBA,
-  diffusionFactor: number
-): RGBA => {
-  return pixel.map(
-    (color, i) =>
-      i === 3 ? color : clampByte(color + quantError[i] * diffusionFactor)
-  ) as RGBA;
-};
-
 const getDiffusionMap = (matrixName: string) => {
   const matrixFactory = diffusionMaps[matrixName] || diffusionMaps.floydSteinberg;
   return matrixFactory();
+};
+
+type DiffusionMap = ReturnType<typeof getDiffusionMap>;
+
+const shouldUseWasmErrorDiffusion = (
+  engine: DitherProcessingEngine | undefined,
+  colorMatching: ColorMatchingMode
+) => (engine === "wasm" || engine === "auto") && colorMatching === "rgb";
+
+interface PaletteMatcher {
+  hasPalette: boolean;
+  findIndex(
+    r: number,
+    g: number,
+    b: number,
+    sourceR: number,
+    sourceG: number,
+    sourceB: number
+  ): number;
+}
+
+const createPaletteMatcher = (
+  colorPalette: RGB[],
+  colorMatching: ColorMatchingMode
+): PaletteMatcher => {
+  const paletteLabs =
+    colorMatching === "lab"
+      ? colorPalette.map((color) => rgbToLab(color[0], color[1], color[2]))
+      : [];
+  const paletteSaturations =
+    colorMatching === "chroma"
+      ? colorPalette.map((color) =>
+          getSaturationFromChannels(color[0], color[1], color[2])
+        )
+      : [];
+  const paletteHues =
+    colorMatching === "chroma"
+      ? colorPalette.map((color) =>
+          getHueFromChannels(color[0], color[1], color[2])
+        )
+      : [];
+
+  return {
+    hasPalette: colorPalette.length > 0,
+    findIndex(r, g, b, sourceR, sourceG, sourceB) {
+      if (!colorPalette.length) return -1;
+
+      let closestIndex = 0;
+      let closestDistance = Infinity;
+
+      if (colorMatching === "lab") {
+        const pixelLab = rgbToLab(r, g, b);
+        for (let index = 0; index < colorPalette.length; index += 1) {
+          const distance = deltaE(paletteLabs[index], pixelLab);
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestIndex = index;
+          }
+        }
+        return closestIndex;
+      }
+
+      const sourceSaturation =
+        colorMatching === "chroma"
+          ? getSaturationFromChannels(sourceR, sourceG, sourceB)
+          : 0;
+      const sourceHue =
+        colorMatching === "chroma" && sourceSaturation >= 0.12
+          ? getHueFromChannels(sourceR, sourceG, sourceB)
+          : null;
+
+      for (let index = 0; index < colorPalette.length; index += 1) {
+        const color = colorPalette[index];
+        const dr = color[0] - r;
+        const dg = color[1] - g;
+        const db = color[2] - b;
+        let distance = Math.sqrt(dr * dr + dg * dg + db * db);
+
+        if (colorMatching === "chroma") {
+          const paletteSaturation = paletteSaturations[index];
+          if (sourceSaturation >= 0.12 && paletteSaturation <= 0.12) {
+            distance += Math.min(330, sourceSaturation * 1300);
+          }
+          if (sourceHue !== null && paletteSaturation > 0.12) {
+            distance += getHueDistance(sourceHue, paletteHues[index]) * 3;
+          }
+        }
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = index;
+        }
+      }
+
+      return closestIndex;
+    },
+  };
 };
 
 const applyErrorDiffusion = (
@@ -490,12 +607,13 @@ const applyErrorDiffusion = (
   width: number,
   height: number,
   colorPalette: RGB[],
-  matrixName: string,
+  diffusionMap: DiffusionMap,
   colorMatching: ColorMatchingMode,
   serpentine: boolean
 ) => {
-  const diffusionMap = getDiffusionMap(matrixName);
   const sourceData = new Uint8ClampedArray(image.data);
+  const data = image.data;
+  const matcher = createPaletteMatcher(colorPalette, colorMatching);
 
   for (let y = 0; y < height; y++) {
     const reverse = serpentine && y % 2 === 1;
@@ -505,46 +623,54 @@ const applyErrorDiffusion = (
 
     for (let x = xStart; x !== xEnd; x += xStep) {
       const currentPixel = (y * width + x) * 4;
-      const oldPixel = getPixelColorValues(currentPixel, image.data);
-      const sourcePixel = getPixelColorValues(currentPixel, sourceData);
-      const newPixel = findClosestPaletteColor(
-        oldPixel,
-        colorPalette,
-        colorMatching,
-        sourcePixel
+      const oldR = data[currentPixel];
+      const oldG = data[currentPixel + 1];
+      const oldB = data[currentPixel + 2];
+      const oldA = data[currentPixel + 3];
+      const sourceR = sourceData[currentPixel];
+      const sourceG = sourceData[currentPixel + 1];
+      const sourceB = sourceData[currentPixel + 2];
+      const closestIndex = matcher.findIndex(
+        oldR,
+        oldG,
+        oldB,
+        sourceR,
+        sourceG,
+        sourceB
       );
+      const newR = matcher.hasPalette ? colorPalette[closestIndex][0] : oldR;
+      const newG = matcher.hasPalette ? colorPalette[closestIndex][1] : oldG;
+      const newB = matcher.hasPalette ? colorPalette[closestIndex][2] : oldB;
+      const newA = matcher.hasPalette ? 255 : oldA;
 
-      setImageDataPixel(image, currentPixel, newPixel);
+      data[currentPixel] = newR;
+      data[currentPixel + 1] = newG;
+      data[currentPixel + 2] = newB;
+      data[currentPixel + 3] = newA;
 
-      const quantError = getQuantError(oldPixel, newPixel);
+      const errorR = oldR - newR;
+      const errorG = oldG - newG;
+      const errorB = oldB - newB;
 
-      diffusionMap.forEach((diffusion) => {
+      for (let index = 0; index < diffusionMap.length; index += 1) {
+        const diffusion = diffusionMap[index];
         const dx = reverse ? -diffusion.offset[0] : diffusion.offset[0];
         const nx = x + dx;
         const ny = y + diffusion.offset[1];
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height) return;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
 
         const pixelIndex = (ny * width + nx) * 4;
-        const errorPixel = addQuantError(
-          getPixelColorValues(pixelIndex, image.data),
-          quantError,
-          diffusion.factor
+        const factor = diffusion.factor;
+        data[pixelIndex] = clampByte(data[pixelIndex] + errorR * factor);
+        data[pixelIndex + 1] = clampByte(
+          data[pixelIndex + 1] + errorG * factor
         );
-        setImageDataPixel(image, pixelIndex, errorPixel);
-      });
+        data[pixelIndex + 2] = clampByte(
+          data[pixelIndex + 2] + errorB * factor
+        );
+      }
     }
   }
-};
-
-const setImageDataPixel = (
-  image: ImageDataLike,
-  pixelIndex: number,
-  pixel: RGBA
-) => {
-  image.data[pixelIndex] = pixel[0];
-  image.data[pixelIndex + 1] = pixel[1];
-  image.data[pixelIndex + 2] = pixel[2];
-  image.data[pixelIndex + 3] = pixel[3] ?? 255;
 };
 
 const randomDitherPixelValue = (pixel: RGBA): RGBA => {
@@ -693,17 +819,23 @@ const hashUnit = (x: number, y: number) => {
   return value - Math.floor(value);
 };
 
-const getSaturation = (color: RGB | RGBA) => {
-  const max = Math.max(color[0], color[1], color[2]) / 255;
-  const min = Math.min(color[0], color[1], color[2]) / 255;
+const getSaturation = (color: RGB | RGBA) =>
+  getSaturationFromChannels(color[0], color[1], color[2]);
+
+const getSaturationFromChannels = (r: number, g: number, b: number) => {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
 
   return max === 0 ? 0 : (max - min) / max;
 };
 
-const getHue = (color: RGB | RGBA) => {
-  const red = color[0] / 255;
-  const green = color[1] / 255;
-  const blue = color[2] / 255;
+const getHue = (color: RGB | RGBA) =>
+  getHueFromChannels(color[0], color[1], color[2]);
+
+const getHueFromChannels = (r: number, g: number, b: number) => {
+  const red = r / 255;
+  const green = g / 255;
+  const blue = b / 255;
   const max = Math.max(red, green, blue);
   const min = Math.min(red, green, blue);
   const delta = max - min;
@@ -720,6 +852,11 @@ const getHue = (color: RGB | RGBA) => {
   }
 
   return hue < 0 ? hue + 360 : hue;
+};
+
+const getHueDistance = (hueA: number, hueB: number) => {
+  const delta = Math.abs(hueA - hueB) % 360;
+  return Math.min(delta, 360 - delta);
 };
 
 const positiveHueDelta = (from: number, to: number) => (to - from + 360) % 360;

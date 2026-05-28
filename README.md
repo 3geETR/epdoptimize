@@ -236,6 +236,18 @@ Reads pixels from `sourceCanvas`, processes and dithers them, then writes to `de
 await ditherImage(sourceCanvas, destinationCanvas, options);
 ```
 
+For RGB error diffusion, an optional WASM engine is available:
+
+```js
+await ditherImage(sourceCanvas, destinationCanvas, {
+  processingEngine: "wasm",
+  colorMatching: "rgb",
+  ditheringType: "errorDiffusion",
+});
+```
+
+Unsupported combinations currently fall back to the JavaScript implementation.
+
 ### `replaceColors(sourceCanvas, destinationCanvas, palette)`
 
 Maps dithered calibrated palette colors to native device colors.
@@ -393,8 +405,9 @@ import {
 | Option                    | Type                                | Default            | Description                                                                                                                                                                                                                                        |
 | ------------------------- | ----------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `palette`                 | string / string[] / palette entries | `"default"`        | Palette to use for quantization. Prefer a built-in palette export or combined palette entries with `color` and `deviceColor`; plain hex arrays work for dither-only previews.                                                                      |
-| `processingPreset`        | string                              | `undefined`        | Preset name. Options: `balanced`, `dynamic`, `vivid`, `soft`, `grayscale`. Presets fill tone mapping, dynamic range compression, color matching, and diffusion defaults unless overridden. Use `suggestProcessingOptions` for automatic selection. |
+| `processingPreset`        | string                              | `undefined`        | Preset name. Options: `balanced`, `dynamic`, `vivid`, `soft`, `grayscale`, `restore`, `posterScan`. Presets fill tone mapping, dynamic range compression, color matching, and diffusion defaults unless overridden. Use `suggestProcessingOptions` for automatic selection. |
 | `ditheringType`           | string                              | `"errorDiffusion"` | Main dithering mode. Options: `errorDiffusion`, `ordered`, `random`, `quantizationOnly`, `hueMix`. `hueMix` is experimental and targets smooth synthetic hue gradients.                                                                            |
+| `processingEngine`        | string                              | `"js"`             | Processing engine. Options: `js`, `wasm`, `auto`. WASM currently accelerates RGB error diffusion and falls back to JS for unsupported combinations.                                                                                                |
 | `errorDiffusionMatrix`    | string                              | `"floydSteinberg"` | Error diffusion kernel. Options include `floydSteinberg`, `atkinson`, `falseFloydSteinberg`, `jarvis`, `stucki`, `burkes`, `sierra3`, `sierra2`, `sierra2-4a`.                                                                                     |
 | `algorithm`               | string                              | `undefined`        | Backwards-compatible alias for `errorDiffusionMatrix`.                                                                                                                                                                                             |
 | `serpentine`              | boolean                             | `false`            | Alternates scan direction on each row for error diffusion.                                                                                                                                                                                         |
@@ -402,6 +415,7 @@ import {
 | `orderedDitheringMatrix`  | [number, number]                    | `[4, 4]`           | Size of the Bayer matrix for ordered dithering.                                                                                                                                                                                                    |
 | `randomDitheringType`     | string                              | `"blackAndWhite"`  | Random mode. Options: `blackAndWhite`, `rgb`.                                                                                                                                                                                                      |
 | `colorMatching`           | string                              | `"rgb"`            | Palette distance model. Options: `rgb`, `lab`, `chroma`. `chroma` is experimental and tries to keep saturated pastel colors from collapsing into white.                                                                                           |
+| `paperNormalization`      | object                              | `undefined`        | Optional scan cleanup. `{ mode: "warmPaper" }` neutralizes warm low-saturation paper, anchors dark neutral ink, and preserves red poster ink before tone mapping.                                                                                   |
 | `toneMapping`             | object                              | `undefined`        | Exposure, saturation, contrast, or S-curve preprocessing.                                                                                                                                                                                          |
 | `dynamicRangeCompression` | object / boolean                    | `undefined`        | LAB lightness compression. Use `{ mode: "display" }`, `{ mode: "auto" }`, or `{ mode: "off" }`.                                                                                                                                                    |
 | `levelCompression`        | object                              | `undefined`        | Optional legacy/preprocessing range remap with `perChannel` or `luma` mode.                                                                                                                                                                        |

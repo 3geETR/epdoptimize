@@ -1,6 +1,6 @@
 {
   "name": "epdoptimize",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Efficiently optimize EPD (Electronic Paper Display) images",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -23,6 +23,8 @@
     "build": "npm run build:js && npm run build:types",
     "build:js": "vite build",
     "build:types": "tsc -p tsconfig.build.json",
+    "build:wasm": "mkdir -p experiments/wasm && asc wasm-src/error-diffusion-rgb.ts -o experiments/wasm/error-diffusion-rgb.wasm -O --noAssert --runtime stub --enable simd",
+    "bench:wasm": "npm run build && node scripts/bench-wasm-error-diffusion.mjs",
     "generate:sample-previews": "./scripts/generate-sample-previews.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepack": "npm run build",
@@ -35,6 +37,7 @@
     "dist"
   ],
   "devDependencies": {
+    "assemblyscript": "^0.28.17",
     "gh-pages": "^6.3.0",
     "typescript": "^5.0.0",
     "vite": "^5.0.0"

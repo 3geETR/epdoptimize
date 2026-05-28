@@ -45,6 +45,7 @@ export const deviceColorsPreview = $("deviceColorsPreview") as HTMLDivElement;
 export const processingPresetSelect = $(
   "processingPreset",
 ) as HTMLSelectElement;
+export const autoFlowSelect = $("autoFlow") as HTMLSelectElement;
 export const ditheringTypeSelect = $("ditheringType") as HTMLSelectElement;
 export const errorDiffusionMatrixSelect = $(
   "errorDiffusionMatrix",
@@ -60,11 +61,11 @@ export const randomDitheringTypeSelect = $(
 ) as HTMLSelectElement;
 export const serpentineCheckbox = $("serpentine") as HTMLInputElement;
 export const colorMatchingSelect = $("colorMatching") as HTMLSelectElement;
+export const processingEngineSelect = $(
+  "processingEngine",
+) as HTMLSelectElement;
 export const autoRecommendationTitle = $(
   "autoRecommendationTitle",
-) as HTMLElement;
-export const autoRecommendationSummary = $(
-  "autoRecommendationSummary",
 ) as HTMLElement;
 export const autoRecommendationReasons = $(
   "autoRecommendationReasons",

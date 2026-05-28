@@ -43,6 +43,7 @@ export const DEFAULT_DITHER_OPTIONS = {
   orderedDitheringMatrix: [4, 4],
   randomDitheringType: "blackAndWhite",
   colorMatching: "rgb",
+  processingEngine: "js",
 };
 
 export const PALETTE_OPTIONS = {

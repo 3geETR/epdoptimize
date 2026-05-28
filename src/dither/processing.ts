@@ -5,6 +5,7 @@ export type ToneMappingMode = "off" | "contrast" | "scurve";
 export type ColorMatchingMode = "rgb" | "lab" | "chroma";
 export type DynamicRangeCompressionMode = "off" | "display" | "auto";
 export type LevelCompressionMode = "off" | "perChannel" | "luma";
+export type PaperNormalizationMode = "off" | "warmPaper";
 
 export type LevelRGB = number | RGB;
 
@@ -42,7 +43,19 @@ export interface DynamicRangeCompressionOptions {
   highPercentile?: number;
 }
 
+export interface PaperNormalizationOptions {
+  mode?: PaperNormalizationMode;
+  strength?: number;
+  minLuma?: number;
+  saturationThreshold?: number;
+  warmBiasThreshold?: number;
+  blackAnchor?: number;
+  preserveRed?: number;
+  paperWhite?: LevelRGB;
+}
+
 export interface ImageProcessingOptions {
+  paperNormalization?: PaperNormalizationOptions;
   toneMapping?: ToneMappingOptions;
   dynamicRangeCompression?: DynamicRangeCompressionOptions | boolean;
 }
@@ -53,12 +66,15 @@ export type ProcessingPresetName =
   | "vivid"
   | "soft"
   | "grayscale"
+  | "restore"
+  | "posterScan"
   | (string & {});
 
 export interface ProcessingPreset {
   name: ProcessingPresetName;
   title: string;
   description: string;
+  paperNormalization?: PaperNormalizationOptions;
   toneMapping: ToneMappingOptions;
   dynamicRangeCompression?: DynamicRangeCompressionOptions;
   colorMatching?: ColorMatchingMode;
@@ -166,6 +182,62 @@ export const PROCESSING_PRESETS: Record<string, ProcessingPreset> = {
     colorMatching: "lab",
     errorDiffusionMatrix: "floydSteinberg",
   },
+  restore: {
+    name: "restore",
+    title: "Restore",
+    description:
+      "Expands faded scans and paintings before mapping them to the display range.",
+    toneMapping: {
+      mode: "scurve",
+      exposure: 1.08,
+      saturation: 0.9,
+      strength: 1,
+      shadowBoost: 0.25,
+      highlightCompress: 0.75,
+      midpoint: 0.46,
+    },
+    dynamicRangeCompression: {
+      mode: "auto",
+      strength: 0.9,
+      lowPercentile: 0.02,
+      highPercentile: 0.98,
+    },
+    colorMatching: "lab",
+    errorDiffusionMatrix: "floydSteinberg",
+  },
+  posterscan: {
+    name: "posterScan",
+    title: "Poster Scan",
+    description:
+      "Neutralizes warm paper, anchors black ink, and preserves strong poster colors.",
+    paperNormalization: {
+      mode: "warmPaper",
+      strength: 0.95,
+      minLuma: 82,
+      saturationThreshold: 0.56,
+      warmBiasThreshold: 8,
+      blackAnchor: 0.95,
+      preserveRed: 0.85,
+      paperWhite: [248, 248, 246],
+    },
+    toneMapping: {
+      mode: "scurve",
+      exposure: 1.04,
+      saturation: 1.05,
+      strength: 0.92,
+      shadowBoost: 0.08,
+      highlightCompress: 0.55,
+      midpoint: 0.44,
+    },
+    dynamicRangeCompression: {
+      mode: "auto",
+      strength: 1,
+      lowPercentile: 0.015,
+      highPercentile: 0.985,
+    },
+    colorMatching: "rgb",
+    errorDiffusionMatrix: "floydSteinberg",
+  },
 };
 
 export const getProcessingPreset = (
@@ -175,6 +247,9 @@ export const getProcessingPreset = (
   return preset
     ? {
         ...preset,
+        paperNormalization: preset.paperNormalization
+          ? { ...preset.paperNormalization }
+          : undefined,
         toneMapping: { ...preset.toneMapping },
         dynamicRangeCompression: preset.dynamicRangeCompression
           ? { ...preset.dynamicRangeCompression }
@@ -183,7 +258,8 @@ export const getProcessingPreset = (
     : null;
 };
 
-export const getProcessingPresetNames = () => Object.keys(PROCESSING_PRESETS);
+export const getProcessingPresetNames = () =>
+  Object.values(PROCESSING_PRESETS).map(({ name }) => name);
 
 export const getProcessingPresetOptions = () =>
   Object.values(PROCESSING_PRESETS).map(({ name, title, description }) => ({
@@ -297,6 +373,85 @@ export const deltaE = (lab1: RGB, lab2: RGB) => {
   const da = lab1[1] - lab2[1];
   const db = lab1[2] - lab2[2];
   return Math.sqrt(dl * dl + da * da + db * db);
+};
+
+const getSaturation = (r: number, g: number, b: number) => {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  return max === 0 ? 0 : (max - min) / max;
+};
+
+const normalize = (value: number, min: number, max: number) =>
+  clamp((value - min) / (max - min), 0, 1);
+
+const isRedInk = (r: number, g: number, b: number, saturation: number) =>
+  saturation >= 0.34 && r >= g + 24 && r >= b + 28;
+
+const applyPaperNormalization = (
+  image: ImageDataLike,
+  options: PaperNormalizationOptions | undefined
+) => {
+  if (!options || options.mode === "off") return;
+
+  const strength = clamp(options.strength ?? 1, 0, 1);
+  if (strength === 0) return;
+
+  const data = image.data;
+  const minLuma = options.minLuma ?? 86;
+  const saturationThreshold = options.saturationThreshold ?? 0.44;
+  const warmBiasThreshold = options.warmBiasThreshold ?? 8;
+  const blackAnchor = clamp(options.blackAnchor ?? 0.85, 0, 1);
+  const preserveRed = clamp(options.preserveRed ?? 0.75, 0, 1);
+  const paperWhite = toRGB(options.paperWhite, 248);
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const luma = luma709(r, g, b);
+    const saturation = getSaturation(r, g, b);
+    const redInk = isRedInk(r, g, b, saturation);
+
+    if (redInk) {
+      const redBoost = strength * preserveRed;
+      data[i] = clampByte(r + (255 - r) * 0.08 * redBoost);
+      data[i + 1] = clampByte(g * (1 - 0.08 * redBoost));
+      data[i + 2] = clampByte(b * (1 - 0.12 * redBoost));
+      continue;
+    }
+
+    const darkNeutralMask =
+      normalize(112 - luma, 0, 72) * normalize(0.42 - saturation, 0, 0.32);
+    if (darkNeutralMask > 0) {
+      const amount = darkNeutralMask * blackAnchor * strength;
+      data[i] = clampByte(r * (1 - 0.72 * amount));
+      data[i + 1] = clampByte(g * (1 - 0.72 * amount));
+      data[i + 2] = clampByte(b * (1 - 0.72 * amount));
+      continue;
+    }
+
+    const warmBias = Math.min(r - b, (r + g) / 2 - b);
+    const warmPaperMask =
+      normalize(luma, minLuma, 210) *
+      normalize(245 - luma, 0, 80) *
+      normalize(saturationThreshold - saturation, 0, saturationThreshold) *
+      normalize(warmBias, warmBiasThreshold, 34);
+
+    if (warmPaperMask <= 0) continue;
+
+    const amount = warmPaperMask * strength;
+    const targetLuma = Math.min(
+      252,
+      luma + (paperWhite[0] - luma) * (0.72 + 0.2 * strength)
+    );
+    const neutralR = targetLuma + (paperWhite[0] - 248) * 0.4;
+    const neutralG = targetLuma + (paperWhite[1] - 248) * 0.4;
+    const neutralB = targetLuma + (paperWhite[2] - 248) * 0.4;
+
+    data[i] = clampByte(r + (neutralR - r) * amount);
+    data[i + 1] = clampByte(g + (neutralG - g) * amount);
+    data[i + 2] = clampByte(b + (neutralB - b) * amount);
+  }
 };
 
 const applyExposure = (image: ImageDataLike, exposure: number) => {
@@ -535,6 +690,7 @@ export const applyImageProcessing = (
   palette?: RGB[]
 ) => {
   if (!options) return;
+  applyPaperNormalization(image, options.paperNormalization);
   applyToneMapping(image, options.toneMapping);
   applyDynamicRangeCompression(
     image,

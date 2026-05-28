@@ -92,6 +92,8 @@ export {
   isPhotoImage,
 } from "./image-style";
 export {
+  suggestLayeredCanvasProcessingOptions,
+  suggestLayeredProcessingOptions,
   suggestCanvasProcessingOptions,
   suggestProcessingOptions,
 } from "./auto-processing";
@@ -100,11 +102,13 @@ export type {
   ColorMatchingMode,
   CanvasLike,
   DitherImageOptions,
+  DitherProcessingEngine,
   DynamicRangeCompressionOptions,
   ImageDataLike,
   ImageProcessingOptions,
   LevelCompressionOptions,
   LevelCompressionMode,
+  PaperNormalizationOptions,
   ProcessingPreset,
   ProcessingPresetName,
   ToneMappingMode,
@@ -119,6 +123,7 @@ export type {
 } from "./image-style";
 export type {
   AutoProcessingIntent,
+  ProcessingPipelineStep,
   ProcessingSuggestion,
   SuggestProcessingOptionsInput,
 } from "./auto-processing";

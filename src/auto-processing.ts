@@ -9,6 +9,7 @@ import type {
   ProcessingPresetName,
   ToneMappingOptions,
 } from "./dither/processing";
+import { getProcessingPreset } from "./dither/processing";
 import type { PaletteColorEntry } from "./dither/functions/palette-order";
 import {
   classifyCanvasImageStyle,
@@ -34,9 +35,18 @@ export interface ProcessingSuggestion {
   classification: ImageStyleClassification;
   imageKind: ImageKind;
   intent: AutoProcessingIntent;
+  strategy?: "legacy" | "layered";
   ditherOptions: Partial<DitherImageOptions>;
   reasons: string[];
   scores: Record<string, number>;
+  pipelineSteps?: ProcessingPipelineStep[];
+}
+
+export interface ProcessingPipelineStep {
+  id: string;
+  title: string;
+  summary: string;
+  ditherOptions?: Partial<DitherImageOptions>;
 }
 
 interface PaletteProfile {
@@ -53,6 +63,8 @@ interface RecommendationBase {
   ditheringType?: DitherImageOptions["ditheringType"];
   toneMapping?: ToneMappingOptions;
   dynamicRangeCompression?: DynamicRangeCompressionOptions;
+  levelCompression?: DitherImageOptions["levelCompression"];
+  paperNormalization?: DitherImageOptions["paperNormalization"];
 }
 
 export function suggestProcessingOptions(
@@ -73,6 +85,32 @@ export function suggestCanvasProcessingOptions(
   return buildSuggestion(classification, getPaletteProfile(palette), options);
 }
 
+export function suggestLayeredProcessingOptions(
+  image: ImageDataLike,
+  palette?: PaletteColorEntry[] | string[],
+  options: SuggestProcessingOptionsInput = {}
+): ProcessingSuggestion {
+  const classification = classifyImageStyle(image, options);
+  return buildLayeredSuggestion(
+    classification,
+    getPaletteProfile(palette),
+    options
+  );
+}
+
+export function suggestLayeredCanvasProcessingOptions(
+  canvas: CanvasLike,
+  palette?: PaletteColorEntry[] | string[],
+  options: SuggestProcessingOptionsInput = {}
+): ProcessingSuggestion {
+  const classification = classifyCanvasImageStyle(canvas, options);
+  return buildLayeredSuggestion(
+    classification,
+    getPaletteProfile(palette),
+    options
+  );
+}
+
 function buildSuggestion(
   classification: ImageStyleClassification,
   paletteProfile: PaletteProfile | null,
@@ -88,7 +126,10 @@ function buildSuggestion(
   addPaletteReasons(paletteProfile, reasons);
   applyPaletteTuning(base, paletteProfile, reasons);
   applyLearnedTuning(base, classification, intent, reasons);
+  applyLowContrastRestoreTuning(base, classification, reasons);
+  applyPosterScanTuning(base, classification, reasons);
   applyIntent(base, intent, reasons);
+  enforceQuantizationGuard(base, classification, reasons);
   if ((base.ditheringType ?? "errorDiffusion") === "errorDiffusion") {
     reasons.push("Serpentine diffusion reduces directional dithering artifacts.");
   }
@@ -97,6 +138,7 @@ function buildSuggestion(
     classification,
     imageKind: classification.kind,
     intent,
+    strategy: "legacy",
     ditherOptions: {
       processingPreset: base.processingPreset,
       colorMatching: base.colorMatching,
@@ -109,9 +151,107 @@ function buildSuggestion(
       ...(base.dynamicRangeCompression
         ? { dynamicRangeCompression: base.dynamicRangeCompression }
         : {}),
+      ...(base.levelCompression ? { levelCompression: base.levelCompression } : {}),
+      ...(base.paperNormalization
+        ? { paperNormalization: base.paperNormalization }
+        : {}),
     },
     reasons,
     scores,
+  };
+}
+
+function buildLayeredSuggestion(
+  classification: ImageStyleClassification,
+  paletteProfile: PaletteProfile | null,
+  options: SuggestProcessingOptionsInput
+): ProcessingSuggestion {
+  const intent = options.intent ?? "natural";
+  const reasons: string[] = [];
+  const scores = getPresetScores(classification, paletteProfile, intent);
+  const base = getLayeredBaseRecommendation(classification.kind);
+  const pipelineSteps: ProcessingPipelineStep[] = [
+    {
+      id: "detect",
+      title: "Detect image kind",
+      summary: `${classification.kind} from the untouched source image.`,
+    },
+    {
+      id: "preset",
+      title: "Apply image-kind preset",
+      summary: `${classification.kind} maps directly to ${base.processingPreset}.`,
+      ditherOptions: {
+        processingPreset: base.processingPreset,
+        ditheringType: base.ditheringType,
+        colorMatching: base.colorMatching,
+        errorDiffusionMatrix: base.errorDiffusionMatrix,
+      },
+    },
+  ];
+
+  addClassificationReasons(classification, reasons);
+  applyLayeredAutoAdjustments(base, classification, paletteProfile, reasons);
+  applyLowContrastRestoreTuning(base, classification, reasons);
+  applyPosterScanTuning(base, classification, reasons);
+  pipelineSteps.push({
+    id: "adjust",
+    title: "Apply auto adjustments",
+    summary: describeLayeredAdjustments(base),
+    ditherOptions: {
+      toneMapping: base.toneMapping,
+      dynamicRangeCompression: base.dynamicRangeCompression,
+      levelCompression: base.levelCompression,
+      paperNormalization: base.paperNormalization,
+    },
+  });
+
+  addPaletteReasons(paletteProfile, reasons);
+  applyPaletteTuning(base, paletteProfile, reasons);
+  applyIntent(base, intent, reasons);
+  enforceQuantizationGuard(base, classification, reasons);
+  pipelineSteps.push({
+    id: "output",
+    title: "Dither and fit to palette",
+    summary:
+      (base.ditheringType ?? "errorDiffusion") === "quantizationOnly"
+        ? "Use direct palette quantization for sharp flat content."
+        : `Use ${base.errorDiffusionMatrix} error diffusion with serpentine scan.`,
+    ditherOptions: {
+      ditheringType: base.ditheringType ?? "errorDiffusion",
+      colorMatching: base.colorMatching,
+      errorDiffusionMatrix: base.errorDiffusionMatrix,
+    },
+  });
+
+  if ((base.ditheringType ?? "errorDiffusion") === "errorDiffusion") {
+    reasons.push("Serpentine diffusion reduces directional dithering artifacts.");
+  }
+
+  return {
+    classification,
+    imageKind: classification.kind,
+    intent,
+    strategy: "layered",
+    ditherOptions: {
+      processingPreset: base.processingPreset,
+      colorMatching: base.colorMatching,
+      errorDiffusionMatrix: base.errorDiffusionMatrix,
+      ditheringType: base.ditheringType ?? "errorDiffusion",
+      ...((base.ditheringType ?? "errorDiffusion") === "errorDiffusion"
+        ? { serpentine: true }
+        : {}),
+      ...(base.toneMapping ? { toneMapping: base.toneMapping } : {}),
+      ...(base.dynamicRangeCompression
+        ? { dynamicRangeCompression: base.dynamicRangeCompression }
+        : {}),
+      ...(base.levelCompression ? { levelCompression: base.levelCompression } : {}),
+      ...(base.paperNormalization
+        ? { paperNormalization: base.paperNormalization }
+        : {}),
+    },
+    reasons,
+    scores,
+    pipelineSteps,
   };
 }
 
@@ -172,22 +312,39 @@ function getBaseRecommendation(
           midpoint: 0.5,
         },
       };
+    case "unknown":
+      return {
+        processingPreset: "balanced",
+        colorMatching: "rgb",
+        errorDiffusionMatrix: "floydSteinberg",
+        ditheringType: "errorDiffusion",
+      };
     case "lowContrastPhoto":
       return {
-        processingPreset: "dynamic",
-        colorMatching: "rgb",
-        errorDiffusionMatrix: "stucki",
+        processingPreset: "restore",
+        colorMatching: "lab",
+        errorDiffusionMatrix: "floydSteinberg",
         ditheringType: "errorDiffusion",
         toneMapping: {
           mode: "scurve",
           exposure: 1.08,
-          saturation: 1.25,
-          strength: 0.82,
-          shadowBoost: 0.06,
-          highlightCompress: 1.35,
-          midpoint: 0.48,
+          saturation: 0.9,
+          strength: 1,
+          shadowBoost: 0.25,
+          highlightCompress: 0.75,
+          midpoint: 0.46,
         },
-        dynamicRangeCompression: { mode: "display", strength: 0.85 },
+        dynamicRangeCompression: {
+          mode: "auto",
+          strength: 0.9,
+          lowPercentile: 0.02,
+          highPercentile: 0.98,
+        },
+        levelCompression: {
+          mode: "luma",
+          black: 8,
+          white: 245,
+        },
       };
     case "highContrastPhoto":
       return {
@@ -205,7 +362,6 @@ function getBaseRecommendation(
           fallbackPreset === "soft" ? "stucki" : "floydSteinberg",
         ditheringType: "errorDiffusion",
       };
-    case "unknown":
     default:
       return {
         processingPreset: "balanced",
@@ -214,6 +370,362 @@ function getBaseRecommendation(
         ditheringType: "errorDiffusion",
       };
   }
+}
+
+function getLayeredBaseRecommendation(kind: ImageKind): RecommendationBase {
+  const presetName = getImageKindPreset(kind);
+  const preset = getProcessingPreset(presetName);
+
+  return {
+    processingPreset: presetName,
+    colorMatching: getImageKindColorMatching(kind, preset?.colorMatching),
+    errorDiffusionMatrix: getImageKindDiffusionMatrix(
+      kind,
+      preset?.errorDiffusionMatrix
+    ),
+    ditheringType: getImageKindDitheringType(kind),
+    toneMapping: preset?.toneMapping ? { ...preset.toneMapping } : undefined,
+    dynamicRangeCompression: preset?.dynamicRangeCompression
+      ? { ...preset.dynamicRangeCompression }
+      : undefined,
+  };
+}
+
+function getImageKindPreset(kind: ImageKind): ProcessingPresetName {
+  switch (kind) {
+    case "lowContrastPhoto":
+      return "restore";
+    case "highContrastPhoto":
+      return "soft";
+    case "flatIllustration":
+    case "pixelArt":
+      return "vivid";
+    case "textOrUi":
+    case "lineArt":
+    case "photo":
+    case "unknown":
+    default:
+      return "balanced";
+  }
+}
+
+function getImageKindColorMatching(
+  kind: ImageKind,
+  fallback: ColorMatchingMode | undefined
+): ColorMatchingMode {
+  if (kind === "lowContrastPhoto") return "lab";
+  if (kind === "textOrUi" || kind === "lineArt") return "lab";
+  return fallback ?? "rgb";
+}
+
+function getImageKindDiffusionMatrix(
+  kind: ImageKind,
+  fallback: string | undefined
+) {
+  if (kind === "highContrastPhoto") {
+    return "stucki";
+  }
+  if (kind === "lowContrastPhoto") return "floydSteinberg";
+  return fallback ?? "floydSteinberg";
+}
+
+function getImageKindDitheringType(
+  kind: ImageKind
+): DitherImageOptions["ditheringType"] {
+  if (kind === "textOrUi" || kind === "lineArt" || kind === "pixelArt") {
+    return "quantizationOnly";
+  }
+  return "errorDiffusion";
+}
+
+function applyLayeredAutoAdjustments(
+  recommendation: RecommendationBase,
+  classification: ImageStyleClassification,
+  paletteProfile: PaletteProfile | null,
+  reasons: string[]
+) {
+  const { metrics } = classification;
+  if (isRestorableLowContrastSource(classification)) return;
+
+  switch (classification.kind) {
+    case "lowContrastPhoto":
+      recommendation.toneMapping = {
+        mode: "scurve",
+        exposure: Math.max(recommendation.toneMapping?.exposure ?? 1, 1.06),
+        saturation:
+          metrics.grayRatio >= 0.72
+            ? 0
+            : Math.min(recommendation.toneMapping?.saturation ?? 0.9, 1.05),
+        strength: metrics.lumaRange <= 70 ? 1 : 0.9,
+        shadowBoost: metrics.lumaP05 >= 55 ? 0.2 : 0.28,
+        highlightCompress: 0.75,
+        midpoint: metrics.lumaP95 <= 190 ? 0.44 : 0.46,
+      };
+      recommendation.dynamicRangeCompression = {
+        mode: "auto",
+        strength: metrics.lumaRange <= 70 ? 0.96 : 0.88,
+        lowPercentile: 0.02,
+        highPercentile: 0.98,
+      };
+      recommendation.levelCompression = {
+        mode: "luma",
+        black: 8,
+        white: 245,
+      };
+      recommendation.colorMatching = metrics.grayRatio >= 0.55 ? "lab" : "rgb";
+      recommendation.errorDiffusionMatrix = "floydSteinberg";
+      reasons.push("Low contrast sources use percentile expansion before dithering.");
+      if (metrics.grayRatio >= 0.55) {
+        reasons.push("Faded gray scans use LAB matching to protect tonal readability.");
+      }
+      break;
+    case "highContrastPhoto":
+      recommendation.toneMapping = {
+        mode: "contrast",
+        exposure: 1,
+        saturation: 1.05,
+        contrast: 0.9,
+      };
+      recommendation.dynamicRangeCompression = {
+        mode: "display",
+        strength: 0.85,
+      };
+      reasons.push("High contrast photos use softer contrast and display fitting.");
+      break;
+    case "photo":
+      if (metrics.lumaStdDev <= 42) {
+        recommendation.toneMapping = {
+          mode: "scurve",
+          exposure: 1.04,
+          saturation: Math.max(
+            recommendation.toneMapping?.saturation ?? 1,
+            1.12
+          ),
+          strength: 0.66,
+          shadowBoost: 0.05,
+          highlightCompress: 1.2,
+          midpoint: 0.49,
+        };
+        recommendation.dynamicRangeCompression = {
+          mode: "auto",
+          strength: 0.68,
+          lowPercentile: 0.01,
+          highPercentile: 0.99,
+        };
+        reasons.push("Mild source range fitting lifts low-spread photo tones.");
+      } else if (metrics.lumaStdDev >= 70) {
+        recommendation.dynamicRangeCompression = {
+          mode: "display",
+          strength: 0.78,
+        };
+        reasons.push("Wide photo luminance gets restrained before dithering.");
+      } else {
+        recommendation.dynamicRangeCompression = {
+          mode: "display",
+          strength: 0.7,
+        };
+      }
+      break;
+    case "flatIllustration":
+      recommendation.toneMapping = {
+        mode: "scurve",
+        exposure: 1.06,
+        saturation: metrics.highSaturationRatio >= 0.28 ? 1.35 : 1.45,
+        strength: 0.68,
+        shadowBoost: 0.06,
+        highlightCompress: 1.2,
+        midpoint: 0.5,
+      };
+      recommendation.dynamicRangeCompression = { mode: "off" };
+      reasons.push("Flat artwork starts vivid, then uses gentler curve shaping.");
+      break;
+    case "textOrUi":
+      recommendation.toneMapping = {
+        mode: "contrast",
+        exposure: 1.04,
+        saturation: metrics.grayRatio >= 0.7 ? 0.85 : 1,
+        contrast: 1.2,
+      };
+      recommendation.dynamicRangeCompression = {
+        mode: "display",
+        strength: 0.72,
+      };
+      reasons.push("UI-like content gets readable contrast before quantization.");
+      break;
+    case "lineArt":
+      recommendation.toneMapping = {
+        mode: "contrast",
+        exposure: 1,
+        saturation: 0.75,
+        contrast: metrics.lumaRange <= 96 ? 1.42 : 1.25,
+      };
+      recommendation.dynamicRangeCompression = {
+        mode: metrics.lumaRange <= 96 ? "auto" : "display",
+        strength: metrics.lumaRange <= 96 ? 0.9 : 0.65,
+        lowPercentile: 0.02,
+        highPercentile: 0.98,
+      };
+      recommendation.levelCompression =
+        metrics.lumaRange <= 96
+          ? { mode: "luma", black: 6, white: 248 }
+          : recommendation.levelCompression;
+      reasons.push("Line art gets desaturated contrast for cleaner edges.");
+      break;
+    case "pixelArt":
+      recommendation.toneMapping = { mode: "off", exposure: 1, saturation: 1 };
+      recommendation.dynamicRangeCompression = { mode: "off" };
+      reasons.push("Pixel art avoids tone reshaping and diffusion texture.");
+      break;
+    case "unknown":
+    default:
+      recommendation.dynamicRangeCompression = {
+        mode: "display",
+        strength: 0.72,
+      };
+      break;
+  }
+
+  if (
+    paletteProfile &&
+    paletteProfile.lumaRange <= 150 &&
+    recommendation.dynamicRangeCompression?.mode === "off"
+  ) {
+    recommendation.dynamicRangeCompression = {
+      mode: "display",
+      strength: 0.7,
+    };
+  }
+}
+
+function describeLayeredAdjustments(recommendation: RecommendationBase) {
+  const tone = recommendation.toneMapping?.mode ?? "off";
+  const range = recommendation.dynamicRangeCompression?.mode ?? "off";
+  const level = recommendation.levelCompression?.mode;
+  return `${tone} tone controls with ${range} range fitting${
+    level && level !== "off" ? ` and ${level} level containment` : ""
+  }.`;
+}
+
+function applyLowContrastRestoreTuning(
+  recommendation: RecommendationBase,
+  classification: ImageStyleClassification,
+  reasons: string[]
+) {
+  if (!isRestorableLowContrastSource(classification)) return;
+
+  const { metrics } = classification;
+  recommendation.processingPreset = "restore";
+  recommendation.colorMatching = metrics.grayRatio >= 0.55 ? "lab" : "rgb";
+  recommendation.errorDiffusionMatrix = "floydSteinberg";
+  recommendation.ditheringType = "errorDiffusion";
+  recommendation.toneMapping = {
+    mode: "scurve",
+    exposure: metrics.lumaP95 <= 190 ? 1.1 : 1.06,
+    saturation: metrics.grayRatio >= 0.72 ? 0 : 0.9,
+    strength: metrics.lumaRange <= 70 ? 1 : 0.92,
+    shadowBoost: metrics.lumaP05 >= 55 ? 0.2 : 0.28,
+    highlightCompress: 0.75,
+    midpoint: metrics.lumaP95 <= 190 ? 0.44 : 0.46,
+  };
+  recommendation.dynamicRangeCompression = {
+    mode: "auto",
+    strength: metrics.lumaRange <= 70 ? 0.96 : 0.9,
+    lowPercentile: 0.02,
+    highPercentile: 0.98,
+  };
+  recommendation.levelCompression = {
+    mode: "luma",
+    black: 8,
+    white: 245,
+  };
+  reasons.push(
+    "Faded low-contrast source uses restore-style range expansion before dithering."
+  );
+}
+
+function isRestorableLowContrastSource(
+  classification: ImageStyleClassification
+) {
+  const { metrics } = classification;
+  if (classification.kind === "lowContrastPhoto") return true;
+  if (metrics.lumaRange > 96 || metrics.lumaStdDev > 32) return false;
+  if (metrics.grayRatio < 0.5 && metrics.saturationMean > 0.18) return false;
+  if (classification.kind === "pixelArt") return false;
+
+  const hasRecoverableStructure =
+    metrics.edgeDensity >= 0.015 ||
+    metrics.softChangeRatio >= 0.12 ||
+    metrics.gradientTileRatio >= 0.04 ||
+    metrics.textTileRatio >= 0.04 ||
+    (metrics.lumaRange <= 70 &&
+      metrics.grayRatio >= 0.7 &&
+      metrics.paletteEntropy >= 0.35 &&
+      metrics.topColorCoverage <= 0.92);
+
+  return hasRecoverableStructure;
+}
+
+function applyPosterScanTuning(
+  recommendation: RecommendationBase,
+  classification: ImageStyleClassification,
+  reasons: string[]
+) {
+  if (!isWarmPosterScanSource(classification)) return;
+
+  recommendation.processingPreset = "posterScan";
+  recommendation.colorMatching = "rgb";
+  recommendation.errorDiffusionMatrix = "floydSteinberg";
+  recommendation.ditheringType = "errorDiffusion";
+  recommendation.paperNormalization = {
+    mode: "warmPaper",
+    strength: 0.95,
+    minLuma: 82,
+    saturationThreshold: 0.56,
+    warmBiasThreshold: 8,
+    blackAnchor: 0.95,
+    preserveRed: 0.85,
+    paperWhite: [248, 248, 246],
+  };
+  recommendation.toneMapping = {
+    mode: "scurve",
+    exposure: 1.04,
+    saturation: 1.05,
+    strength: 0.92,
+    shadowBoost: 0.08,
+    highlightCompress: 0.55,
+    midpoint: 0.44,
+  };
+  recommendation.dynamicRangeCompression = {
+    mode: "auto",
+    strength: 1,
+    lowPercentile: 0.015,
+    highPercentile: 0.985,
+  };
+  recommendation.levelCompression = {
+    mode: "luma",
+    black: 3,
+    white: 252,
+  };
+  reasons.push(
+    "Warm poster paper is neutralized while black and red ink are preserved."
+  );
+}
+
+function isWarmPosterScanSource(classification: ImageStyleClassification) {
+  const { metrics } = classification;
+  const hasWarmPaper = metrics.warmPaperRatio >= 0.18;
+  const hasInk =
+    metrics.darkNeutralRatio >= 0.025 ||
+    metrics.redRatio >= 0.008 ||
+    metrics.strongEdgeRatio >= 0.05;
+  const isGraphicOrPosterLike =
+    classification.kind === "flatIllustration" ||
+    classification.kind === "textOrUi" ||
+    classification.kind === "lineArt" ||
+    metrics.flatRatio >= 0.5 ||
+    metrics.topColorCoverage >= 0.36;
+
+  return hasWarmPaper && hasInk && isGraphicOrPosterLike;
 }
 
 function getPresetScores(
@@ -229,6 +741,8 @@ function getPresetScores(
     vivid: 0.45,
     soft: 0.44,
     grayscale: 0.28,
+    restore: 0.34,
+    posterScan: 0.32,
   };
 
   if (classification.style === "photo") {
@@ -241,6 +755,7 @@ function getPresetScores(
   }
 
   scores.dynamic += kindScores.lowContrastPhoto * 0.24;
+  scores.restore += kindScores.lowContrastPhoto * 0.34;
   scores.soft += kindScores.highContrastPhoto * 0.26;
   scores.vivid += kindScores.flatIllustration * 0.24;
   scores.vivid += kindScores.pixelArt * 0.18;
@@ -251,6 +766,14 @@ function getPresetScores(
 
   if (metrics.saturationMean <= 0.1 && metrics.grayRatio >= 0.82) {
     scores.grayscale += 0.22;
+  }
+
+  if (metrics.lumaRange <= 96 && metrics.lumaStdDev <= 38) {
+    scores.restore += 0.2;
+  }
+
+  if (isWarmPosterScanSource(classification)) {
+    scores.posterScan += 0.42;
   }
 
   if (paletteProfile && paletteProfile.colorCount <= 2) {
@@ -285,17 +808,26 @@ function addClassificationReasons(
   if (metrics.lumaStdDev <= 28) {
     reasons.push("Low luminance spread benefits from stronger tone shaping.");
   }
+  if (metrics.lumaRange > 0 && metrics.lumaRange <= 96) {
+    reasons.push("Narrow usable luminance range benefits from percentile expansion.");
+  }
   if (metrics.lumaStdDev >= 72) {
     reasons.push("High luminance spread benefits from softer compression.");
   }
   if (metrics.strongEdgeRatio >= 0.22) {
-    reasons.push("Strong edges favor edge-preserving quantization.");
+    reasons.push("Strong edges favor sharper edge handling.");
   }
   if (metrics.topColorCoverage >= 0.55) {
-    reasons.push("Dominant repeated colors suggest palette-preserving settings.");
+    reasons.push("Dominant repeated colors suggest careful palette matching.");
   }
   if (metrics.textTileRatio >= 0.12) {
     reasons.push("Text-like tiles favor readable edge handling.");
+  }
+  if (metrics.warmPaperRatio >= 0.18) {
+    reasons.push("Warm paper-like background should be neutralized before matching.");
+  }
+  if (metrics.darkNeutralRatio >= 0.025) {
+    reasons.push("Dark neutral ink can be anchored harder toward black.");
   }
   if (metrics.photoTileRatio >= 0.4) {
     reasons.push("Photo-like tiles favor smoother tonal processing.");
@@ -364,6 +896,8 @@ function applyLearnedTuning(
 
   const { metrics } = classification;
 
+  if (isRestorableLowContrastSource(classification)) return;
+
   if (
     classification.kind === "flatIllustration" &&
     metrics.grayRatio >= 0.82 &&
@@ -425,6 +959,63 @@ function applyPaletteTuning(
       ),
     };
   }
+}
+
+function enforceQuantizationGuard(
+  recommendation: RecommendationBase,
+  classification: ImageStyleClassification,
+  reasons: string[]
+) {
+  if (recommendation.ditheringType !== "quantizationOnly") return;
+
+  if (isClearlyQuantizationFriendly(classification)) {
+    reasons.push(
+      "Very flat artwork with little photo or gradient detail can skip dithering."
+    );
+    return;
+  }
+
+  recommendation.ditheringType = "errorDiffusion";
+  reasons.push("Photo-like detail or subtle gradients keep dithering enabled.");
+}
+
+function isClearlyQuantizationFriendly(
+  classification: ImageStyleClassification
+) {
+  const { metrics } = classification;
+  const hasPhotoLikeDetail =
+    classification.style === "photo" ||
+    classification.photoScore >= 0.34 ||
+    metrics.photoTileRatio >= 0.1 ||
+    metrics.gradientTileRatio >= 0.08 ||
+    metrics.softChangeRatio >= 0.28;
+
+  if (hasPhotoLikeDetail) return false;
+
+  const hasFlatRepeatedColor =
+    metrics.flatRatio >= 0.7 &&
+    metrics.topColorCoverage >= 0.72 &&
+    metrics.paletteEntropy <= 0.72;
+  const hasClearTextOrUi =
+    metrics.textTileRatio >= 0.16 &&
+    metrics.edgeDensity >= 0.1 &&
+    metrics.grayRatio >= 0.5 &&
+    metrics.topColorCoverage >= 0.62;
+  const hasClearLineArt =
+    metrics.grayRatio >= 0.76 &&
+    metrics.edgeDensity >= 0.12 &&
+    metrics.topColorCoverage >= 0.68 &&
+    metrics.highSaturationRatio <= 0.08;
+  const hasClearPixelArt =
+    metrics.flatRatio >= 0.78 &&
+    metrics.flatTileRatio >= 0.44 &&
+    metrics.topColorCoverage >= 0.78 &&
+    metrics.softChangeRatio <= 0.16;
+
+  return (
+    hasFlatRepeatedColor &&
+    (hasClearTextOrUi || hasClearLineArt || hasClearPixelArt)
+  );
 }
 
 function getBestScore(scores: Record<string, number>): ProcessingPresetName {

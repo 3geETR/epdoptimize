@@ -23,12 +23,18 @@ export interface ImageStyleMetrics {
   horizontalEdgeRatio: number;
   verticalEdgeRatio: number;
   lumaStdDev: number;
+  lumaP05: number;
+  lumaP95: number;
+  lumaRange: number;
   saturationMean: number;
   saturationStdDev: number;
   darkRatio: number;
   lightRatio: number;
   grayRatio: number;
   highSaturationRatio: number;
+  warmPaperRatio: number;
+  redRatio: number;
+  darkNeutralRatio: number;
   photoTileRatio: number;
   flatTileRatio: number;
   textTileRatio: number;
@@ -87,12 +93,18 @@ const EMPTY_METRICS: ImageStyleMetrics = {
   horizontalEdgeRatio: 0,
   verticalEdgeRatio: 0,
   lumaStdDev: 0,
+  lumaP05: 0,
+  lumaP95: 0,
+  lumaRange: 0,
   saturationMean: 0,
   saturationStdDev: 0,
   darkRatio: 0,
   lightRatio: 0,
   grayRatio: 0,
   highSaturationRatio: 0,
+  warmPaperRatio: 0,
+  redRatio: 0,
+  darkNeutralRatio: 0,
   photoTileRatio: 0,
   flatTileRatio: 0,
   textTileRatio: 0,
@@ -144,12 +156,16 @@ export function classifyImageStyle(
   let transparentCount = 0;
   let lumaSum = 0;
   let lumaSquareSum = 0;
+  const lumaValues: number[] = [];
   let saturationSum = 0;
   let saturationSquareSum = 0;
   let darkCount = 0;
   let lightCount = 0;
   let grayCount = 0;
   let highSaturationCount = 0;
+  let warmPaperCount = 0;
+  let redCount = 0;
+  let darkNeutralCount = 0;
 
   for (let y = 0; y < sampleHeight; y += 1) {
     const sourceY = Math.min(
@@ -187,12 +203,22 @@ export function classifyImageStyle(
       visibleCount += 1;
       lumaSum += luma;
       lumaSquareSum += luma * luma;
+      lumaValues.push(luma);
       saturationSum += saturation;
       saturationSquareSum += saturation * saturation;
       if (luma <= 36) darkCount += 1;
       if (luma >= 220) lightCount += 1;
       if (saturation <= 0.08) grayCount += 1;
       if (saturation >= 0.72) highSaturationCount += 1;
+      if (isWarmPaperPixel(red, green, blue, luma, saturation)) {
+        warmPaperCount += 1;
+      }
+      if (isRedPixel(red, green, blue, saturation)) {
+        redCount += 1;
+      }
+      if (luma <= 88 && saturation <= 0.36) {
+        darkNeutralCount += 1;
+      }
       const colorKey = getQuantizedColorKey(red, green, blue);
       colorCounts.set(colorKey, (colorCounts.get(colorKey) ?? 0) + 1);
 
@@ -226,6 +252,8 @@ export function classifyImageStyle(
   const edgeMetrics = getEdgeMetrics(samples, sampleWidth, sampleHeight);
   const tileMetrics = getTileMetrics(samples, sampleWidth, sampleHeight);
   const lumaMean = lumaSum / visibleCount;
+  const lumaP05 = percentile(lumaValues, 0.05);
+  const lumaP95 = percentile(lumaValues, 0.95);
   const saturationMean = saturationSum / visibleCount;
   const metrics: ImageStyleMetrics = {
     sampleCount: visibleCount,
@@ -241,6 +269,9 @@ export function classifyImageStyle(
     lumaStdDev: Math.sqrt(
       Math.max(0, lumaSquareSum / visibleCount - lumaMean * lumaMean)
     ),
+    lumaP05,
+    lumaP95,
+    lumaRange: lumaP95 - lumaP05,
     saturationMean,
     saturationStdDev: Math.sqrt(
       Math.max(
@@ -252,6 +283,9 @@ export function classifyImageStyle(
     lightRatio: lightCount / visibleCount,
     grayRatio: grayCount / visibleCount,
     highSaturationRatio: highSaturationCount / visibleCount,
+    warmPaperRatio: warmPaperCount / visibleCount,
+    redRatio: redCount / visibleCount,
+    darkNeutralRatio: darkNeutralCount / visibleCount,
     photoTileRatio: tileMetrics.photoTileRatio,
     flatTileRatio: tileMetrics.flatTileRatio,
     textTileRatio: tileMetrics.textTileRatio,
@@ -655,6 +689,7 @@ function getImageKindScores(
 ): Record<ImageKind, number> {
   const contrastEndpointRatio = metrics.darkRatio + metrics.lightRatio;
   const photoTileLineArtPenalty = normalize(metrics.photoTileRatio, 0.32, 0.58);
+  const lowUsableRangeScore = normalize(92 - metrics.lumaRange, 0, 72);
 
   return {
     photo: clamp01(
@@ -665,7 +700,8 @@ function getImageKindScores(
     ),
     lowContrastPhoto: clamp01(
       photoScore * 0.38 +
-        normalize(34 - metrics.lumaStdDev, 0, 22) * 0.34 +
+        normalize(34 - metrics.lumaStdDev, 0, 22) * 0.24 +
+        lowUsableRangeScore * 0.22 +
         normalize(metrics.gradientTileRatio, 0.16, 0.55) * 0.18 +
         normalize(metrics.softChangeRatio, 0.24, 0.5) * 0.1
     ),
@@ -715,6 +751,16 @@ function getBestKind(scores: Record<ImageKind, number>): ImageKind {
   )[0] as ImageKind;
 }
 
+function percentile(values: number[], p: number) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const index = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.round((sorted.length - 1) * p))
+  );
+  return sorted[index];
+}
+
 function getColorDifference(a: Sample, b: Sample): number {
   const red = a.red - b.red;
   const green = a.green - b.green;
@@ -735,6 +781,32 @@ function getSaturation(red: number, green: number, blue: number): number {
   }
 
   return (max - min) / max;
+}
+
+function isWarmPaperPixel(
+  red: number,
+  green: number,
+  blue: number,
+  luma: number,
+  saturation: number
+) {
+  return (
+    luma >= 92 &&
+    luma <= 230 &&
+    saturation >= 0.06 &&
+    saturation <= 0.56 &&
+    red >= blue + 10 &&
+    green >= blue - 6
+  );
+}
+
+function isRedPixel(
+  red: number,
+  green: number,
+  blue: number,
+  saturation: number
+) {
+  return saturation >= 0.34 && red >= green + 24 && red >= blue + 28;
 }
 
 function getQuantizedColorKey(red: number, green: number, blue: number): number {

@@ -3,10 +3,12 @@ import {
   getProcessingPreset,
   getProcessingPresetOptions,
   replaceColors,
+  suggestLayeredCanvasProcessingOptions,
   suggestCanvasProcessingOptions,
 } from "../src";
 import type {
   DitherImageOptions,
+  DitherProcessingEngine,
   ImageStyleClassification,
   PaletteColorEntry,
   ProcessingSuggestion,
@@ -28,8 +30,8 @@ import {
 import {
   apiKeyInput,
   autoRecommendationReasons,
-  autoRecommendationSummary,
   autoRecommendationTitle,
+  autoFlowSelect,
   canvasFrames,
   canvasGrid,
   colorMatchingSelect,
@@ -64,6 +66,7 @@ import {
   palettePreview,
   paletteSelect,
   paperIdInput,
+  processingEngineSelect,
   processingPresetSelect,
   randomDitheringTypeSelect,
   sampleImageGrid,
@@ -83,7 +86,6 @@ import {
   formatImageStyle,
   formatPresetName,
   formatRatio,
-  formatTopScores,
 } from "./demo/format";
 import type {
   DemoConfig,
@@ -114,6 +116,19 @@ let scheduledProcess = 0;
 let processToken = 0;
 let showOriginalSize = false;
 let currentProcessingSuggestion: ProcessingSuggestion | null = null;
+let previousAutoSuggestion: ProcessingSuggestion | null = null;
+let layeredAutoSuggestion: ProcessingSuggestion | null = null;
+let autoControlsDirty = false;
+let workerRequestId = 0;
+let processingWorker: Worker | null = null;
+let cancelProcessingWorkerRequest: (() => void) | null = null;
+let autoAnalysisCache:
+  | {
+      key: string;
+      previous: ProcessingSuggestion;
+      layered: ProcessingSuggestion;
+    }
+  | null = null;
 let syncingCanvasScroll = false;
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -256,6 +271,7 @@ async function loadSelectedSampleImage() {
     selectedSampleUrl || import.meta.env.BASE_URL + "example-dither.jpg";
   currentImageName = sampleNameByUrl.get(src) ?? "Sample image";
   lastImage = await loadImage(src);
+  autoControlsDirty = false;
   await processImage();
 }
 
@@ -412,6 +428,10 @@ function applyResolvedDitherOptionsToUI(options: Partial<DitherImageOptions>) {
       preset?.colorMatching ??
       DEFAULT_DITHER_OPTIONS.colorMatching,
   );
+  setSelectValue(
+    processingEngineSelect,
+    options.processingEngine ?? DEFAULT_DITHER_OPTIONS.processingEngine,
+  );
 
   const orderedDitheringMatrix =
     options.orderedDitheringMatrix ??
@@ -536,6 +556,68 @@ function getDitherOptionsFromUI(palette: PaletteColorEntry[]) {
     randomDitheringType: randomDitheringTypeSelect.value,
     palette,
     colorMatching: colorMatchingSelect.value as DitherImageOptions["colorMatching"],
+    processingEngine: processingEngineSelect.value as DitherProcessingEngine,
+    calibrate: true,
+    toneMapping: getToneMappingFromUI(),
+    dynamicRangeCompression: getDynamicRangeCompressionFromUI(),
+  };
+}
+
+function getSelectedAutoSuggestion() {
+  return autoFlowSelect.value === "previous"
+    ? previousAutoSuggestion
+    : layeredAutoSuggestion;
+}
+
+function getAutoAnalysisCacheKey() {
+  const screenResolution = getSelectedScreenResolution();
+  return JSON.stringify({
+    image: lastImage
+      ? {
+          src: lastImage.currentSrc || lastImage.src,
+          width: lastImage.naturalWidth,
+          height: lastImage.naturalHeight,
+        }
+      : null,
+    screen: screenResolution.name,
+    screenWidth: screenResolution.width,
+    screenHeight: screenResolution.height,
+    orientation: getSelectedOrientation(),
+    imageFit: getSelectedImageFit(),
+    palette: paletteSelect.value,
+    canvasWidth: inputCanvas.width,
+    canvasHeight: inputCanvas.height,
+  });
+}
+
+function getAutoAnalysisSuggestions(palette: PaletteColorEntry[]) {
+  const key = getAutoAnalysisCacheKey();
+  if (autoAnalysisCache?.key === key) {
+    return autoAnalysisCache;
+  }
+
+  const previous = suggestCanvasProcessingOptions(inputCanvas, palette);
+  const layered = suggestLayeredCanvasProcessingOptions(inputCanvas, palette);
+  autoAnalysisCache = { key, previous, layered };
+  return autoAnalysisCache;
+}
+
+function getAutoDitherOptionsFromUI(palette: PaletteColorEntry[]) {
+  const suggestion = getSelectedAutoSuggestion();
+
+  return {
+    ...suggestion?.ditherOptions,
+    ditheringType: ditheringTypeSelect.value,
+    errorDiffusionMatrix: errorDiffusionMatrixSelect.value,
+    serpentine: serpentineCheckbox.checked,
+    orderedDitheringMatrix: [
+      parseInt(orderedDitheringMatrixW.value, 10),
+      parseInt(orderedDitheringMatrixH.value, 10),
+    ],
+    randomDitheringType: randomDitheringTypeSelect.value,
+    palette,
+    colorMatching: colorMatchingSelect.value as DitherImageOptions["colorMatching"],
+    processingEngine: processingEngineSelect.value as DitherProcessingEngine,
     calibrate: true,
     toneMapping: getToneMappingFromUI(),
     dynamicRangeCompression: getDynamicRangeCompressionFromUI(),
@@ -606,6 +688,12 @@ function isDynamicRangePresetValue() {
 
 function getConfigDitherOptionsFromUI() {
   if (processingPresetSelect.value === "auto") {
+    if (autoControlsDirty) {
+      const { palette: _palette, calibrate: _calibrate, ...options } =
+        getAutoDitherOptionsFromUI(getSelectedPaletteOption().palette);
+      return getCompactDitherOptions(options);
+    }
+
     return currentProcessingSuggestion
       ? getCompactDitherOptions(currentProcessingSuggestion.ditherOptions)
       : { processingPreset: "balanced" };
@@ -649,6 +737,10 @@ function getConfigDitherOptionsFromUI() {
     (preset?.colorMatching ?? DEFAULT_DITHER_OPTIONS.colorMatching)
   ) {
     configOptions.colorMatching = colorMatchingSelect.value;
+  }
+
+  if (processingEngineSelect.value !== DEFAULT_DITHER_OPTIONS.processingEngine) {
+    configOptions.processingEngine = processingEngineSelect.value;
   }
 
   if (
@@ -722,6 +814,13 @@ function getCompactDitherOptions(options: Partial<DitherImageOptions>) {
   }
 
   if (
+    options.processingEngine &&
+    options.processingEngine !== DEFAULT_DITHER_OPTIONS.processingEngine
+  ) {
+    configOptions.processingEngine = options.processingEngine;
+  }
+
+  if (
     options.errorDiffusionMatrix &&
     options.errorDiffusionMatrix !==
       (preset?.errorDiffusionMatrix ??
@@ -736,6 +835,14 @@ function getCompactDitherOptions(options: Partial<DitherImageOptions>) {
 
   if (options.dynamicRangeCompression) {
     configOptions.dynamicRangeCompression = options.dynamicRangeCompression;
+  }
+
+  if (options.levelCompression) {
+    configOptions.levelCompression = options.levelCompression;
+  }
+
+  if (options.paperNormalization) {
+    configOptions.paperNormalization = options.paperNormalization;
   }
 
   return configOptions;
@@ -837,38 +944,137 @@ function updateAutoRecommendation(suggestion: ProcessingSuggestion | null) {
 
   if (!suggestion) {
     autoRecommendationTitle.textContent = "Auto recommendation";
-    autoRecommendationSummary.textContent = "Analyzing image...";
     return;
   }
 
   const { ditherOptions } = suggestion;
-  autoRecommendationTitle.textContent = `Auto: ${formatPresetName(
+  autoRecommendationTitle.textContent = `${formatPresetName(
+    suggestion.strategy ?? "auto",
+  )} auto: ${formatPresetName(
     ditherOptions.processingPreset,
   )}`;
-  autoRecommendationSummary.textContent = [
-    formatImageKind(suggestion.imageKind),
-    ditherOptions.colorMatching
-      ? `${String(ditherOptions.colorMatching).toUpperCase()} matching`
-      : "",
-    ditherOptions.errorDiffusionMatrix
-      ? `${formatPresetName(ditherOptions.errorDiffusionMatrix)} diffusion`
-      : "",
-    ditherOptions.ditheringType === "quantizationOnly"
-      ? "quantization only"
-      : "",
-    `kind scores: ${formatTopScores(suggestion.classification.kindScores)}`,
-    `preset scores: ${formatTopScores(suggestion.scores)}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   autoRecommendationReasons.replaceChildren(
-    ...suggestion.reasons.slice(0, 4).map((reason) => {
+    ...suggestion.reasons
+      .filter((reason) => !reason.startsWith("Detected "))
+      .slice(0, 3)
+      .map((reason) => {
       const item = document.createElement("li");
       item.textContent = reason;
       return item;
     }),
   );
+}
+
+function canUseProcessingWorker() {
+  if (typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined") {
+    return false;
+  }
+
+  return true;
+}
+
+function putImageDataOnCanvas(
+  canvas: HTMLCanvasElement,
+  imageData: ImageData,
+) {
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Unable to draw processed image data.");
+  ctx.putImageData(imageData, 0, 0);
+}
+
+async function renderProcessedCanvases(
+  palette: PaletteColorEntry[],
+  options: DitherImageOptions,
+) {
+  if (!canUseProcessingWorker()) {
+    await ditherImage(inputCanvas, outputCanvas, options);
+    replaceColors(outputCanvas, deviceColorsCanvas, palette);
+    return;
+  }
+
+  if (cancelProcessingWorkerRequest) {
+    cancelProcessingWorkerRequest();
+  }
+
+  const ctx = inputCanvas.getContext("2d");
+  if (!ctx) return;
+
+  const imageData = ctx.getImageData(0, 0, inputCanvas.width, inputCanvas.height);
+  const id = ++workerRequestId;
+  const worker = new Worker(
+    new URL("./demo/processing-worker.ts", import.meta.url),
+    { type: "module" },
+  );
+  processingWorker = worker;
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      worker.removeEventListener("message", onMessage);
+      worker.removeEventListener("error", onError);
+      if (processingWorker === worker) {
+        processingWorker = null;
+      }
+      if (cancelProcessingWorkerRequest === cancelCurrentRequest) {
+        cancelProcessingWorkerRequest = null;
+      }
+    };
+    const cancelCurrentRequest = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      worker.terminate();
+      reject(new DOMException("Processing request was superseded.", "AbortError"));
+    };
+    const onError = (event: ErrorEvent) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      worker.terminate();
+      reject(event.error ?? new Error(event.message));
+    };
+    const onMessage = (
+      event: MessageEvent<{
+        id: number;
+        ditheredImageData?: ImageData;
+        deviceImageData?: ImageData;
+        error?: string;
+      }>,
+    ) => {
+      if (settled) return;
+      if (event.data.id !== id) return;
+      settled = true;
+      cleanup();
+      worker.terminate();
+
+      if (event.data.error) {
+        reject(new Error(event.data.error));
+        return;
+      }
+
+      if (event.data.ditheredImageData && event.data.deviceImageData) {
+        putImageDataOnCanvas(outputCanvas, event.data.ditheredImageData);
+        putImageDataOnCanvas(deviceColorsCanvas, event.data.deviceImageData);
+      }
+      resolve();
+    };
+
+    cancelProcessingWorkerRequest = cancelCurrentRequest;
+    worker.addEventListener("message", onMessage);
+    worker.addEventListener("error", onError);
+    worker.postMessage(
+      {
+        id,
+        imageData,
+        options,
+        palette,
+      },
+      [imageData.data.buffer],
+    );
+  });
 }
 
 async function processImage() {
@@ -878,13 +1084,19 @@ async function processImage() {
   drawImageToScreenCanvas(lastImage, inputCanvas);
 
   const { palette } = getSelectedPaletteOption();
-  currentProcessingSuggestion = suggestCanvasProcessingOptions(
-    inputCanvas,
-    palette,
-  );
-  if (processingPresetSelect.value === "auto") {
+  const autoSuggestions = getAutoAnalysisSuggestions(palette);
+  previousAutoSuggestion = autoSuggestions.previous;
+  layeredAutoSuggestion = autoSuggestions.layered;
+  currentProcessingSuggestion = getSelectedAutoSuggestion();
+
+  if (
+    currentProcessingSuggestion &&
+    processingPresetSelect.value === "auto" &&
+    !autoControlsDirty
+  ) {
     applyResolvedDitherOptionsToUI(currentProcessingSuggestion.ditherOptions);
   }
+  if (!currentProcessingSuggestion) return;
   updateImageStyleResult(currentProcessingSuggestion.classification);
   updateAutoRecommendation(currentProcessingSuggestion);
   refreshControlState();
@@ -892,14 +1104,18 @@ async function processImage() {
 
   const options =
     processingPresetSelect.value === "auto"
-      ? { ...currentProcessingSuggestion.ditherOptions, palette }
+      ? getAutoDitherOptionsFromUI(palette)
       : getDitherOptionsFromUI(palette);
 
-  await ditherImage(inputCanvas, outputCanvas, options);
+  try {
+    await renderProcessedCanvases(palette, options);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    throw error;
+  }
   if (token !== processToken) return;
 
   downloadLink.href = outputCanvas.toDataURL("image/png");
-  replaceColors(outputCanvas, deviceColorsCanvas, palette);
   downloadDeviceColorsLink.href = deviceColorsCanvas.toDataURL("image/png");
 }
 
@@ -912,6 +1128,7 @@ fileInput.addEventListener("change", async () => {
   lastImage = img;
   selectedSampleUrl = "";
   currentImageName = file.name;
+  autoControlsDirty = false;
   updateSelectedSampleButton();
   URL.revokeObjectURL(src);
   await processImage();
@@ -939,6 +1156,8 @@ function refreshControlState() {
   document.querySelectorAll<HTMLElement>("[data-drc-auto]").forEach((el) => {
     el.hidden = !showAutoRange;
   });
+
+  autoFlowSelect.disabled = processingPresetSelect.value !== "auto";
 }
 
 function scheduleProcessImage() {
@@ -952,6 +1171,7 @@ function scheduleProcessImage() {
 const controls = [
   paletteSelect,
   processingPresetSelect,
+  autoFlowSelect,
   ditheringTypeSelect,
   errorDiffusionMatrixSelect,
   orderedDitheringMatrixW,
@@ -959,6 +1179,7 @@ const controls = [
   randomDitheringTypeSelect,
   serpentineCheckbox,
   colorMatchingSelect,
+  processingEngineSelect,
   toneModeSelect,
   exposureInput,
   saturationInput,
@@ -975,14 +1196,32 @@ const controls = [
 
 controls.forEach((el) => {
   el.addEventListener("change", () => {
+    if (
+      processingPresetSelect.value === "auto" &&
+      el !== processingPresetSelect &&
+      el !== autoFlowSelect &&
+      el !== paletteSelect
+    ) {
+      autoControlsDirty = true;
+    }
+
     if (el === processingPresetSelect) {
+      autoControlsDirty = false;
       applyPresetToUI(processingPresetSelect.value);
+    }
+    if (el === autoFlowSelect || el === paletteSelect) {
+      autoControlsDirty = false;
     }
     scheduleProcessImage();
   });
 
   if (el instanceof HTMLInputElement) {
-    el.addEventListener("input", scheduleProcessImage);
+    el.addEventListener("input", () => {
+      if (processingPresetSelect.value === "auto") {
+        autoControlsDirty = true;
+      }
+      scheduleProcessImage();
+    });
   }
 });
 
@@ -999,6 +1238,7 @@ copyJsExampleButton.addEventListener("click", async () => {
     select.addEventListener("change", () => {
       saveDeviceTestConfig();
       setDeviceTestStatus("");
+      autoControlsDirty = false;
       scheduleProcessImage();
     });
   },

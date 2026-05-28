@@ -1,5 +1,6 @@
 import {
   ditherImage,
+  suggestLayeredCanvasProcessingOptions,
   suggestCanvasProcessingOptions,
   type AutoProcessingIntent,
   type DitherImageOptions,
@@ -13,6 +14,7 @@ import type { ImageFitMode, ScreenOrientation } from "./demo/types";
 type VoteChoice = "left" | "right" | "tie" | "skip";
 type SampleMode = "all" | "selected";
 type ComparisonMode =
+  | "legacyLayered"
   | "autoBaseline"
   | "chromaRgb"
   | "hueMixRgb"
@@ -65,6 +67,8 @@ interface CurrentPair {
   right: RatingVariant;
 }
 
+type ProbeKind = "softRainbow" | "magentaAzureBands" | "pastelMagenta";
+
 const STORAGE_KEY = "epdoptimize:pairwise-ratings:v1";
 const RATING_ENDPOINT = `${import.meta.env.BASE_URL}__epdoptimize-rating-votes`;
 const $ = <T extends HTMLElement>(id: string) =>
@@ -97,6 +101,17 @@ const sampleImages = import.meta.glob("./sampleImages/*.{jpg,jpeg,png,webp}", {
   query: "?url",
   import: "default",
 }) as Record<string, string>;
+
+function createProbeImageUrl(kind: ProbeKind) {
+  const body =
+    kind === "softRainbow"
+      ? `<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#ff5a7a"/><stop offset=".25" stop-color="#f4d24a"/><stop offset=".5" stop-color="#3bcf76"/><stop offset=".75" stop-color="#3a88ff"/><stop offset="1" stop-color="#c35cff"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><rect x="80" y="80" width="640" height="320" rx="36" fill="#ffffff" opacity=".22"/>`
+      : kind === "magentaAzureBands"
+        ? `<defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#f037a6"/><stop offset=".5" stop-color="#7b68ff"/><stop offset="1" stop-color="#2ac5e8"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><g opacity=".35"><rect x="0" y="72" width="800" height="42" fill="#fff"/><rect x="0" y="212" width="800" height="42" fill="#111"/><rect x="0" y="352" width="800" height="42" fill="#fff"/></g>`
+        : `<rect width="100%" height="100%" fill="#f7e9f2"/><circle cx="250" cy="240" r="190" fill="#ee79b8"/><circle cx="520" cy="240" r="175" fill="#7fd4ef" opacity=".86"/><rect x="90" y="360" width="620" height="70" fill="#fff6b8" opacity=".9"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">${body}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 
 const generatedProbeImages: ImageSource[] = [
   {
@@ -215,7 +230,16 @@ async function loadNextPair() {
     const inputCanvas = drawImageToScreenCanvas(img);
     const palette = getSelectedPalette();
     const suggestion = suggestCanvasProcessingOptions(inputCanvas, palette);
-    const variants = getRatingVariants(inputCanvas, palette, suggestion);
+    const layeredSuggestion = suggestLayeredCanvasProcessingOptions(
+      inputCanvas,
+      palette,
+    );
+    const variants = getRatingVariants(
+      inputCanvas,
+      palette,
+      suggestion,
+      layeredSuggestion,
+    );
     const [left, right] = pickVariantPair(variants);
 
     await Promise.all([
@@ -264,7 +288,23 @@ function getRatingVariants(
   inputCanvas: HTMLCanvasElement,
   palette: PaletteColorEntry[],
   naturalSuggestion: ProcessingSuggestion,
+  layeredSuggestion: ProcessingSuggestion,
 ) {
+  if ((comparisonModeSelect.value as ComparisonMode) === "legacyLayered") {
+    return [
+      {
+        id: "auto:previous",
+        label: "Previous Auto",
+        ditherOptions: naturalSuggestion.ditherOptions,
+      },
+      {
+        id: "auto:layered",
+        label: "Layered Auto",
+        ditherOptions: layeredSuggestion.ditherOptions,
+      },
+    ];
+  }
+
   if ((comparisonModeSelect.value as ComparisonMode) === "autoBaseline") {
     return [
       {
@@ -339,6 +379,38 @@ function getRatingVariants(
         errorDiffusionMatrix: "stucki",
         serpentine: true,
         colorMatching: "rgb",
+      },
+    },
+    {
+      id: "preset:restore",
+      label: "Preset restore",
+      ditherOptions: {
+        processingPreset: "restore",
+        ditheringType: "errorDiffusion",
+        errorDiffusionMatrix: "floydSteinberg",
+        serpentine: true,
+        colorMatching: "lab",
+        levelCompression: {
+          mode: "luma",
+          black: 8,
+          white: 245,
+        },
+      },
+    },
+    {
+      id: "preset:poster-scan",
+      label: "Preset poster scan",
+      ditherOptions: {
+        processingPreset: "posterScan",
+        ditheringType: "errorDiffusion",
+        errorDiffusionMatrix: "floydSteinberg",
+        serpentine: true,
+        colorMatching: "rgb",
+        levelCompression: {
+          mode: "luma",
+          black: 3,
+          white: 252,
+        },
       },
     },
     {

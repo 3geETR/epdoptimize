@@ -382,7 +382,7 @@
 
       .canvas-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
         gap: 1rem;
         align-items: start;
       }
@@ -448,6 +448,47 @@
         color: var(--muted);
         font-size: 0.82rem;
         line-height: 1.35;
+      }
+
+      .processing-inputs {
+        display: grid;
+        gap: 0.55rem;
+        grid-column: 1 / -1;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: processing;
+      }
+
+      .processing-inputs li {
+        display: grid;
+        grid-template-columns: 1.65rem minmax(0, 1fr);
+        gap: 0.5rem;
+        padding: 0.55rem 0;
+        border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      }
+
+      .processing-inputs li::before {
+        counter-increment: processing;
+        content: counter(processing);
+        display: grid;
+        place-items: center;
+        width: 1.5rem;
+        height: 1.5rem;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--paper);
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .processing-inputs h4 {
+        margin: 0 0 0.35rem;
+        color: var(--ink);
+        font-size: 0.85rem;
+        line-height: 1.25;
       }
 
       canvas {
@@ -691,259 +732,294 @@
 
           <fieldset>
             <legend><h3>Processing</h3></legend>
-            <div class="control-grid">
-              <div class="control full">
-                <label for="processingPreset">Preset</label>
-                <select id="processingPreset"></select>
-              </div>
-              <div class="auto-recommendation">
-                <strong id="autoRecommendationTitle"
-                  >Auto recommendation</strong
-                >
-                <span id="autoRecommendationSummary">Analyzing image...</span>
-                <ul id="autoRecommendationReasons"></ul>
-              </div>
-
-              <div class="control">
-                <label for="toneMode">Tone mode</label>
-                <select id="toneMode">
-                  <option value="off">Off</option>
-                  <option value="contrast">Contrast</option>
-                  <option value="scurve">S-curve</option>
-                </select>
-              </div>
-
-              <div class="control">
-                <label for="colorMatching">Matching</label>
-                <select id="colorMatching">
-                  <option value="rgb">RGB</option>
-                  <option value="lab">LAB</option>
-                  <option value="chroma">Chroma experimental</option>
-                </select>
-              </div>
-
-              <div class="control">
-                <label for="exposure">Exposure</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="exposure"
-                    min="0.5"
-                    max="2"
-                    step="0.05"
-                    value="1"
-                  />
-                  <output data-for="exposure"></output>
+            <ol class="processing-inputs" aria-label="Processing steps">
+              <li>
+                <div>
+                  <h4>Preset</h4>
+                  <div class="control-grid">
+                    <div class="control full">
+                      <label for="processingPreset">Preset</label>
+                      <select id="processingPreset"></select>
+                    </div>
+                    <div class="control full">
+                      <label for="autoFlow">Auto flow</label>
+                      <select id="autoFlow">
+                        <option value="layered" selected>Layered auto</option>
+                        <option value="previous">Previous auto</option>
+                      </select>
+                    </div>
+                    <div class="auto-recommendation">
+                      <strong id="autoRecommendationTitle"
+                        >Auto recommendation</strong
+                      >
+                      <ul id="autoRecommendationReasons"></ul>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </li>
 
-              <div class="control">
-                <label for="saturation">Saturation</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="saturation"
-                    min="0"
-                    max="2"
-                    step="0.05"
-                    value="1"
-                  />
-                  <output data-for="saturation"></output>
+              <li>
+                <div>
+                  <h4>Tone adjustments</h4>
+                  <div class="control-grid">
+                    <div class="control full">
+                      <label for="toneMode">Tone mode</label>
+                      <select id="toneMode">
+                        <option value="off">Off</option>
+                        <option value="contrast">Contrast</option>
+                        <option value="scurve">S-curve</option>
+                      </select>
+                    </div>
+
+                    <div class="control">
+                      <label for="exposure">Exposure</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="exposure"
+                          min="0.5"
+                          max="2"
+                          step="0.05"
+                          value="1"
+                        />
+                        <output data-for="exposure"></output>
+                      </div>
+                    </div>
+
+                    <div class="control">
+                      <label for="saturation">Saturation</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="saturation"
+                          min="0"
+                          max="2"
+                          step="0.05"
+                          value="1"
+                        />
+                        <output data-for="saturation"></output>
+                      </div>
+                    </div>
+
+                    <div class="control full" data-tone-panel="contrast">
+                      <label for="contrast">Contrast</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="contrast"
+                          min="0.5"
+                          max="2"
+                          step="0.05"
+                          value="1"
+                        />
+                        <output data-for="contrast"></output>
+                      </div>
+                    </div>
+
+                    <div class="control" data-tone-panel="scurve">
+                      <label for="scurveStrength">S-curve</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="scurveStrength"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value="0.9"
+                        />
+                        <output data-for="scurveStrength"></output>
+                      </div>
+                    </div>
+
+                    <div class="control" data-tone-panel="scurve">
+                      <label for="shadowBoost">Shadows</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="shadowBoost"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value="0"
+                        />
+                        <output data-for="shadowBoost"></output>
+                      </div>
+                    </div>
+
+                    <div class="control" data-tone-panel="scurve">
+                      <label for="highlightCompress">Highlights</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="highlightCompress"
+                          min="0.5"
+                          max="5"
+                          step="0.05"
+                          value="1.5"
+                        />
+                        <output data-for="highlightCompress"></output>
+                      </div>
+                    </div>
+
+                    <div class="control" data-tone-panel="scurve">
+                      <label for="midpoint">Midpoint</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="midpoint"
+                          min="0.3"
+                          max="0.7"
+                          step="0.01"
+                          value="0.5"
+                        />
+                        <output data-for="midpoint"></output>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </li>
 
-              <div class="control full" data-tone-panel="contrast">
-                <label for="contrast">Contrast</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="contrast"
-                    min="0.5"
-                    max="2"
-                    step="0.05"
-                    value="1"
-                  />
-                  <output data-for="contrast"></output>
+              <li>
+                <div>
+                  <h4>Range fitting</h4>
+                  <div class="control-grid">
+                    <div class="control">
+                      <label for="dynamicRangeMode">Mode</label>
+                      <select id="dynamicRangeMode">
+                        <option value="off">Off</option>
+                        <option value="display">Display</option>
+                        <option value="auto">Auto</option>
+                      </select>
+                    </div>
+                    <div class="control">
+                      <label for="dynamicRangeStrength">Strength</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="dynamicRangeStrength"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value="1"
+                        />
+                        <output data-for="dynamicRangeStrength"></output>
+                      </div>
+                    </div>
+                    <div class="control" data-drc-auto>
+                      <label for="lowPercentile">Low %</label>
+                      <input
+                        type="number"
+                        id="lowPercentile"
+                        min="0"
+                        max="0.25"
+                        step="0.005"
+                        value="0.01"
+                      />
+                    </div>
+                    <div class="control" data-drc-auto>
+                      <label for="highPercentile">High %</label>
+                      <input
+                        type="number"
+                        id="highPercentile"
+                        min="0.75"
+                        max="1"
+                        step="0.005"
+                        value="0.99"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </li>
 
-              <div class="control" data-tone-panel="scurve">
-                <label for="scurveStrength">S-curve</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="scurveStrength"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value="0.9"
-                  />
-                  <output data-for="scurveStrength"></output>
+              <li>
+                <div>
+                  <h4>Dither and matching</h4>
+                  <div class="control-grid">
+                    <div class="control">
+                      <label for="colorMatching">Matching</label>
+                      <select id="colorMatching">
+                        <option value="rgb">RGB</option>
+                        <option value="lab">LAB</option>
+                        <option value="chroma">Chroma experimental</option>
+                      </select>
+                    </div>
+
+                    <div class="control">
+                      <label for="processingEngine">Engine</label>
+                      <select id="processingEngine">
+                        <option value="js">JavaScript</option>
+                        <option value="wasm">WASM</option>
+                        <option value="auto">Auto</option>
+                      </select>
+                    </div>
+
+                    <div class="control">
+                      <label for="ditheringType">Type</label>
+                      <select id="ditheringType">
+                        <option value="errorDiffusion">Error diffusion</option>
+                        <option value="ordered">Ordered</option>
+                        <option value="random">Random</option>
+                        <option value="quantizationOnly">
+                          Quantization only
+                        </option>
+                        <option value="hueMix">Hue mix experimental</option>
+                      </select>
+                    </div>
+
+                    <div class="control">
+                      <label for="errorDiffusionMatrix">Kernel</label>
+                      <select id="errorDiffusionMatrix">
+                        <option value="floydSteinberg">Floyd-Steinberg</option>
+                        <option value="atkinson">Atkinson</option>
+                        <option value="falseFloydSteinberg">
+                          False Floyd-Steinberg
+                        </option>
+                        <option value="jarvis">Jarvis</option>
+                        <option value="stucki">Stucki</option>
+                        <option value="burkes">Burkes</option>
+                        <option value="sierra3">Sierra-3</option>
+                        <option value="sierra2">Sierra-2</option>
+                        <option value="sierra2-4a">Sierra-2-4A</option>
+                      </select>
+                    </div>
+
+                    <label class="check">
+                      <input type="checkbox" id="serpentine" checked />
+                      Serpentine
+                    </label>
+
+                    <div class="control">
+                      <label for="randomDitheringType">Random</label>
+                      <select id="randomDitheringType">
+                        <option value="blackAndWhite">Black and white</option>
+                        <option value="rgb">RGB</option>
+                      </select>
+                    </div>
+
+                    <div class="control">
+                      <label for="orderedDitheringMatrixW">Matrix W</label>
+                      <input
+                        type="number"
+                        id="orderedDitheringMatrixW"
+                        value="4"
+                        min="1"
+                        max="8"
+                      />
+                    </div>
+                    <div class="control">
+                      <label for="orderedDitheringMatrixH">Matrix H</label>
+                      <input
+                        type="number"
+                        id="orderedDitheringMatrixH"
+                        value="4"
+                        min="1"
+                        max="8"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              <div class="control" data-tone-panel="scurve">
-                <label for="shadowBoost">Shadows</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="shadowBoost"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value="0"
-                  />
-                  <output data-for="shadowBoost"></output>
-                </div>
-              </div>
-
-              <div class="control" data-tone-panel="scurve">
-                <label for="highlightCompress">Highlights</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="highlightCompress"
-                    min="0.5"
-                    max="5"
-                    step="0.05"
-                    value="1.5"
-                  />
-                  <output data-for="highlightCompress"></output>
-                </div>
-              </div>
-
-              <div class="control" data-tone-panel="scurve">
-                <label for="midpoint">Midpoint</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="midpoint"
-                    min="0.3"
-                    max="0.7"
-                    step="0.01"
-                    value="0.5"
-                  />
-                  <output data-for="midpoint"></output>
-                </div>
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend><h3>Range</h3></legend>
-            <div class="control-grid">
-              <div class="control">
-                <label for="dynamicRangeMode">Mode</label>
-                <select id="dynamicRangeMode">
-                  <option value="off">Off</option>
-                  <option value="display">Display</option>
-                  <option value="auto">Auto</option>
-                </select>
-              </div>
-              <div class="control">
-                <label for="dynamicRangeStrength">Strength</label>
-                <div class="range-row">
-                  <input
-                    type="range"
-                    id="dynamicRangeStrength"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value="1"
-                  />
-                  <output data-for="dynamicRangeStrength"></output>
-                </div>
-              </div>
-              <div class="control" data-drc-auto>
-                <label for="lowPercentile">Low %</label>
-                <input
-                  type="number"
-                  id="lowPercentile"
-                  min="0"
-                  max="0.25"
-                  step="0.005"
-                  value="0.01"
-                />
-              </div>
-              <div class="control" data-drc-auto>
-                <label for="highPercentile">High %</label>
-                <input
-                  type="number"
-                  id="highPercentile"
-                  min="0.75"
-                  max="1"
-                  step="0.005"
-                  value="0.99"
-                />
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend><h3>Dither</h3></legend>
-            <div class="control-grid">
-              <div class="control">
-                <label for="ditheringType">Type</label>
-                <select id="ditheringType">
-                  <option value="errorDiffusion">Error diffusion</option>
-                  <option value="ordered">Ordered</option>
-                  <option value="random">Random</option>
-                  <option value="quantizationOnly">Quantization only</option>
-                  <option value="hueMix">Hue mix experimental</option>
-                </select>
-              </div>
-
-              <div class="control">
-                <label for="errorDiffusionMatrix">Kernel</label>
-                <select id="errorDiffusionMatrix">
-                  <option value="floydSteinberg">Floyd-Steinberg</option>
-                  <option value="atkinson">Atkinson</option>
-                  <option value="falseFloydSteinberg">
-                    False Floyd-Steinberg
-                  </option>
-                  <option value="jarvis">Jarvis</option>
-                  <option value="stucki">Stucki</option>
-                  <option value="burkes">Burkes</option>
-                  <option value="sierra3">Sierra-3</option>
-                  <option value="sierra2">Sierra-2</option>
-                  <option value="sierra2-4a">Sierra-2-4A</option>
-                </select>
-              </div>
-
-              <label class="check">
-                <input type="checkbox" id="serpentine" checked />
-                Serpentine
-              </label>
-
-              <div class="control">
-                <label for="randomDitheringType">Random</label>
-                <select id="randomDitheringType">
-                  <option value="blackAndWhite">Black and white</option>
-                  <option value="rgb">RGB</option>
-                </select>
-              </div>
-
-              <div class="control">
-                <label for="orderedDitheringMatrixW">Matrix W</label>
-                <input
-                  type="number"
-                  id="orderedDitheringMatrixW"
-                  value="4"
-                  min="1"
-                  max="8"
-                />
-              </div>
-              <div class="control">
-                <label for="orderedDitheringMatrixH">Matrix H</label>
-                <input
-                  type="number"
-                  id="orderedDitheringMatrixH"
-                  value="4"
-                  min="1"
-                  max="8"
-                />
-              </div>
-            </div>
+              </li>
+            </ol>
           </fieldset>
 
           <fieldset>
@@ -1101,7 +1177,7 @@
               <div class="preview-title">
                 <h2>Dithered</h2>
                 <p class="preview-subtitle">
-                  Emulating how the image will look in the Display
+                  Output with the active controls
                 </p>
               </div>
               <a
