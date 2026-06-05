@@ -718,6 +718,7 @@ Dithering creates the impression of intermediate colors by distributing quantiza
 - [Inkify](https://github.com/cmdwtf/Inkify)
 - [epaper-image-convert](https://github.com/aitjcize/epaper-image-convert)
 - [eInk Dither Tester](https://github.com/mattcarter11/eink-dithering-tester)
+- [GuySie/opendithering](https://github.com/GuySie/opendithering)
 
 ---
 
