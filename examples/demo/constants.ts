@@ -137,7 +137,7 @@ export const PALETTE_OPTIONS = {
     palette: spectra6Palette,
   },
   "spectra6-original": {
-    label: "Spectra 6 Original",
+    label: "Spectra 6 Original (no replace)",
     exportName: "spectra6OriginalPalette",
     palette: spectra6OriginalPalette,
   },

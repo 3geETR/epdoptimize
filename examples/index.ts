@@ -1973,7 +1973,7 @@ configTabButtons.forEach((button) => {
   });
 });
 
-testOnDeviceButton.addEventListener("click", () => testOnDevice(lastImage));
+testOnDeviceButton.addEventListener("click", () => testOnDevice());
 
 toggleOriginalSizeButton.addEventListener("click", () => {
   showOriginalSize = !showOriginalSize;

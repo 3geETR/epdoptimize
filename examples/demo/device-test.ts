@@ -47,14 +47,11 @@ export function getOriginalImageOrientation(
   return height > width ? "portrait" : "landscape";
 }
 
-export function getDeviceUploadOrientation(
-  img: HTMLImageElement | null,
-): Exclude<ScreenOrientation, "original"> {
-  const orientation = getSelectedOrientation();
-  if (orientation !== "original") return orientation;
-  return img && getOriginalImageOrientation(img) === "portrait"
-    ? "portrait"
-    : "landscape";
+export function getDeviceUploadOrientation(): Exclude<
+  ScreenOrientation,
+  "original"
+> {
+  return "landscape";
 }
 
 export function getSelectedImageFit(): ImageFitMode {
@@ -111,7 +108,7 @@ export function setDeviceTestStatus(
   deviceTestStatus.dataset.state = state;
 }
 
-export async function testOnDevice(lastImage: HTMLImageElement | null) {
+export async function testOnDevice() {
   const { paperId, apiKey } = getDeviceTestConfig();
 
   if (!paperId) {
@@ -133,8 +130,8 @@ export async function testOnDevice(lastImage: HTMLImageElement | null) {
   setDeviceTestStatus("Uploading...");
 
   try {
-    const pictureBlob = await canvasToPngBlob(outputCanvas);
-    const pictureDeviceBlob = await canvasToPngBlob(deviceColorsCanvas);
+    const pictureBlob = await canvasToLandscapePngBlob(outputCanvas);
+    const pictureDeviceBlob = await canvasToLandscapePngBlob(deviceColorsCanvas);
     const formData = new FormData();
     formData.append("picture", pictureBlob, "epdoptimize-dithered.png");
     formData.append(
@@ -146,7 +143,7 @@ export async function testOnDevice(lastImage: HTMLImageElement | null) {
       "settings",
       JSON.stringify({
         meta: {
-          orientation: getDeviceUploadOrientation(lastImage),
+          orientation: getDeviceUploadOrientation(),
         },
       }),
     );
@@ -179,6 +176,29 @@ export async function testOnDevice(lastImage: HTMLImageElement | null) {
   } finally {
     testOnDeviceButton.disabled = false;
   }
+}
+
+function canvasToLandscapePngBlob(canvas: HTMLCanvasElement) {
+  return canvasToPngBlob(getLandscapeCanvas(canvas));
+}
+
+function getLandscapeCanvas(canvas: HTMLCanvasElement) {
+  if (canvas.width >= canvas.height) return canvas;
+
+  const landscapeCanvas = document.createElement("canvas");
+  landscapeCanvas.width = canvas.height;
+  landscapeCanvas.height = canvas.width;
+
+  const ctx = landscapeCanvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Could not create landscape canvas.");
+  }
+
+  ctx.translate(landscapeCanvas.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(canvas, 0, 0);
+
+  return landscapeCanvas;
 }
 
 function canvasToPngBlob(canvas: HTMLCanvasElement) {

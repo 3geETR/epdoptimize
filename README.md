@@ -24,31 +24,52 @@ You can order our Spectra 6 eInk picture frame [here](https://paperlesspaper.de/
 
 ![Intro image](https://raw.githubusercontent.com/paperlesspaper/epdoptimize/refs/heads/main/intro-image.jpg)
 
-## Features
+## What it does
 
-- **Calibrated display palettes:** Dither against measured display colors, then export native device colors.
-- **Single palette config:** Palette entries contain `name`, `color`, and `deviceColor`.
-- **Multiple dithering modes:** Error diffusion, ordered dithering, random dithering, blue-noise/whole-image variants, and quantization-only conversion.
-- **Advanced tone mapping:** Exposure, saturation, contrast, and S-curve controls inspired by [epaper-image-convert](https://github.com/aitjcize/epaper-image-convert).
-- **Dynamic range compression:** LAB lightness remapping into the target display range.
-- **Color matching modes:** RGB, LAB, or chroma-aware palette matching.
-- **Optional edge handling:** Preserve hard line-art/text edges or smooth antialiased edge bands after dithering.
-- **Automatic processing suggestions:** Heuristically classify the image, score presets, and suggest dither options for the selected palette.
-- **Interactive demo and rating tool:** Sample images, palette previews, automatic/manual processing controls, pairwise A/B voting, downloads, compact config JSON, and copyable JS example.
+### Calibrated display palettes
+
+Dither against measured display colors, then export native device colors.
+
+**Why?** eInk panels use fully saturated colors internally (for example red: #ff0000), but in reality they can't cover the full sRGB colorspace.
+
+### Multiple dithering modes
+
+Error diffusion, ordered dithering, random dithering, blue-noise/whole-image variants, and quantization-only conversion.
+
+**Why?** Like offset print, most eInk panels can reproduce only a limited set of discrete colors. [Dithering](https://en.wikipedia.org/wiki/Dither) is therefore required to approximate all intermediate colors.
+
+### Advanced tone mapping
+
+Exposure, saturation, contrast, and S-curve controls inspired by [epaper-image-convert](https://github.com/aitjcize/epaper-image-convert).
+
+**Why?** Source images are usually prepared for emissive screens, not reflective eInk. Tone controls make it possible to compensate for muted colors, low contrast, and the different perceived brightness of paper-like displays before dithering.
+
+### Dynamic range compression
+
+LAB lightness remapping into the target display range.
+
+**Why?** eInk palettes have a narrower usable brightness range than the source image. Compressing lightness in LAB space helps preserve shadow and highlight detail instead of clipping it to the nearest available ink color.
+
+### Color matching modes
+
+RGB, LAB, or chroma-aware palette matching.
+
+**Why?** The “nearest” color depends on how distance is measured. RGB matching is simple and predictable, LAB better reflects human perception.
+
+### Experimental: Edge handling
+
+Preserve hard line-art/text edges or smooth antialiased edge bands after dithering.
+
+**Why?** ithering can make text, icons, and line art look noisy or fuzzy. Edge handling keeps sharp content readable while still allowing smoother treatment for photographic or antialiased areas.
+
+### Automatic processing suggestions
+
+Heuristically classify the image, score presets, and suggest dither options for the selected palette.
+
+**Why?** Photos, screenshots, comics, and text-heavy images benefit from different conversion settings. Automatic suggestions provide a better starting point without requiring manual tuning for every image.
 
 ![Screenshot of the UI](/screenshot-with-frame.png)
 [Visit the dithering tool](https://paperlesspaper.github.io/epdoptimize/)
-
-Built-in palette exports currently include:
-
-- `defaultPalette` (black and white)
-- `aitjcizeSpectra6Palette` (Spectra 6)
-- `spectra6OriginalPalette` (fully saturated Spectra 6 colors)
-- `spectra6OriginalPreviewPalette` (fully saturated Spectra 6 lookup with calibrated Spectra 6 preview colors)
-- `spectra6Palette` (not recommended)
-- `spectra6legacyPalette` (not recommended)
-- `acepPalette`
-- `gameboyPalette`
 
 ## Installation
 
