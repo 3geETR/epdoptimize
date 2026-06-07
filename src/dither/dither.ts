@@ -734,6 +734,19 @@ const applyImageAdjustments = async (
   return imageDataToCanvas(image, canvas);
 };
 
+const applyImageDataAdjustments = (
+  image: ImageDataLike,
+  opts: DitherImageOptions = {}
+): ImageDataLike | undefined => {
+  if (!image) return;
+
+  const options = getResolvedDitherOptions(opts);
+  const colorPalette = getColorPaletteFromOptions(options);
+  applyImageAdjustmentsToImageData(image, options, colorPalette);
+
+  return image;
+};
+
 const ditherCanvas = async (
   sourceCanvas: CanvasLike,
   canvas: CanvasLike,
@@ -1674,4 +1687,9 @@ const imageDataToCanvas = (imageData: ImageDataLike, canvas: CanvasLike) => {
   return canvas;
 };
 
-export { applyImageAdjustments, ditherCanvas, ditherImage };
+export {
+  applyImageAdjustments,
+  applyImageDataAdjustments,
+  ditherCanvas,
+  ditherImage,
+};

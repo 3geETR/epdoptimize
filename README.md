@@ -219,6 +219,9 @@ type AutoCanvasDitherOptions = {
 tone and range defaults. The recommended preset is available as metadata on
 `canvasAuto.presetName`.
 
+For a Fabric.js editor integration with custom per-image filters and simplified
+highlights/shadows controls, see [FABRIC_FILTER_README.md](FABRIC_FILTER_README.md).
+
 ## Palette Format
 
 Palettes live in [src/dither/data/default-palettes.json](src/dither/data/default-palettes.json). Each palette is an array of entries:
@@ -656,9 +659,13 @@ Tone mapping options:
 - `mode`: Optional legacy selector. Use `off`, `contrast`, or `scurve` to force one behavior. Omit it to apply contrast and S-curve controls together.
 - `exposure`: Exposure adjustment in stops. `0` is neutral, `1` doubles brightness, and `-1` halves it.
 - `saturation`: Saturation adjustment. `0` is neutral, `0.4` means 1.4x, and `-1` removes saturation.
-- `contrast`: Contrast adjustment. `0` is neutral, `0.08` means 1.08x, and negative values reduce contrast.
+- `contrast`: Contrast adjustment. `0` is neutral and positive values increase
+  contrast linearly. Negative values reduce contrast more gently, so `-1`
+  keeps a `0.5x` contrast multiplier instead of collapsing to flat gray.
 - `strength`: S-curve strength. Use `0` to disable S-curve shaping.
-- `shadowBoost`: Lifts dark values when S-curve strength is active.
+- `shadowBoost`: Lifts dark values when S-curve strength is active. The tone
+  mapper applies a `1.5x` internal shadow response to make shadow recovery more
+  visible at practical values.
 - `highlightCompress`: Adjusts bright values when S-curve strength is active. Negative values pull highlights down; positive values lift them.
 - `midpoint`: S-curve midpoint.
 

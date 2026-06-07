@@ -80,6 +80,7 @@ export type {
 
 export {
   applyImageAdjustments,
+  applyImageDataAdjustments,
   ditherCanvas,
   ditherImage,
 } from "./dither/dither";

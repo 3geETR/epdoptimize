@@ -40,7 +40,7 @@ export interface ToneMappingOptions {
    */
   saturation?: number;
   /**
-   * Contrast adjustment. `0` is neutral, `0.25` means 1.25x, `-0.1` means 0.9x.
+   * Contrast adjustment. `0` is neutral, `0.25` means 1.25x, `-1` means 0.5x.
    */
   contrast?: number;
   strength?: number;
@@ -118,6 +118,9 @@ const exposureAdjustmentToMultiplier = (adjustment: number) =>
 
 const linearAdjustmentToMultiplier = (adjustment: number) =>
   Math.max(0, adjustment + 1);
+
+const contrastAdjustmentToMultiplier = (adjustment: number) =>
+  adjustment < 0 ? Math.max(0.5, 1 + adjustment * 0.5) : adjustment + 1;
 
 export const PROCESSING_PRESETS: Record<string, ProcessingPreset> = {
   balanced: {
@@ -302,6 +305,8 @@ export const getProcessingPresetOptions = () =>
 
 const clamp = (value: number, min: number, max: number) =>
   value < min ? min : value > max ? max : value;
+
+const SHADOW_TONE_RESPONSE = 1.5;
 
 export const clampByte = (value: number) => {
   if (!Number.isFinite(value)) return 0;
@@ -672,7 +677,11 @@ const applyScurveToneMap = (
   if (strength === 0) return;
   const data = image.data;
   const mid = clamp(midpoint, 0.01, 0.99);
-  const shadowExponent = clamp(1 - strength * shadowBoost, 0.15, 3);
+  const shadowExponent = clamp(
+    1 - strength * shadowBoost * SHADOW_TONE_RESPONSE,
+    0.15,
+    3
+  );
   const highlightExponent = clamp(1 - strength * highlightBoost, 0.15, 3);
   const lookup = new Uint8ClampedArray(256);
 
@@ -923,7 +932,7 @@ export const applyToneMapping = (
 
   const exposure = exposureAdjustmentToMultiplier(options.exposure ?? 0);
   const saturation = linearAdjustmentToMultiplier(options.saturation ?? 0);
-  const contrast = linearAdjustmentToMultiplier(options.contrast ?? 0);
+  const contrast = contrastAdjustmentToMultiplier(options.contrast ?? 0);
   const mode = options.mode;
 
   applyExposure(image, exposure);

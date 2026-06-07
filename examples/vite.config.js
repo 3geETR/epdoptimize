@@ -68,6 +68,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         demo: path.resolve(__dirname, "index.html"),
+        fabricFilter: path.resolve(__dirname, "fabric-filter.html"),
         ratingTool: path.resolve(__dirname, "rating-tool.html"),
       },
     },

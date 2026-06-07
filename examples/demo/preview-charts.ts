@@ -20,6 +20,9 @@ interface RangeFittingPreviewOptions {
 }
 
 const histogramSampleCanvas = document.createElement("canvas");
+const SHADOW_TONE_RESPONSE = 1.5;
+const contrastAdjustmentToMultiplier = (adjustment: number) =>
+  adjustment < 0 ? Math.max(0.5, 1 + adjustment * 0.5) : adjustment + 1;
 
 export function drawToneCurvePreview(
   canvas: HTMLCanvasElement,
@@ -326,7 +329,7 @@ function applyToneCurvePreviewValue(
   toneMapping: ToneMappingPreview,
 ) {
   const exposure = Math.pow(2, toneMapping.exposure ?? 0);
-  const contrast = Math.max(0, (toneMapping.contrast ?? 0) + 1);
+  const contrast = contrastAdjustmentToMultiplier(toneMapping.contrast ?? 0);
   let value = clampNumber(input * exposure, 0, 1);
   value = clampNumber((value - 0.5) * contrast + 0.5, 0, 1);
 
@@ -337,7 +340,7 @@ function applyToneCurvePreviewValue(
   if (value < midpoint) {
     const shadowValue = value / midpoint;
     const exponent = clampNumber(
-      1 - strength * (toneMapping.shadowBoost ?? 0),
+      1 - strength * (toneMapping.shadowBoost ?? 0) * SHADOW_TONE_RESPONSE,
       0.15,
       3,
     );

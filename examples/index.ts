@@ -1166,14 +1166,6 @@ function getCompactImageAdjustmentOptions(
     configOptions.paperNormalization = options.paperNormalization;
   }
 
-  if (options.edgePreservation?.enabled) {
-    configOptions.edgePreservation = options.edgePreservation;
-  }
-
-  if (options.edgeAntialiasing?.enabled) {
-    configOptions.edgeAntialiasing = options.edgeAntialiasing;
-  }
-
   return configOptions;
 }
 

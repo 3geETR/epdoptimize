@@ -562,7 +562,7 @@ function getSCurveToneMapping(
 
   const contrast =
     toneMapping?.mode === "contrast"
-      ? linearAdjustmentToMultiplier(toneMapping.contrast ?? 0)
+      ? contrastAdjustmentToMultiplier(toneMapping.contrast ?? 0)
       : 1;
 
   return {
@@ -890,6 +890,12 @@ function linearAdjustmentFromMultiplier(multiplier: number) {
 
 function linearAdjustmentToMultiplier(adjustment: number) {
   return Math.max(0, adjustment + 1);
+}
+
+function contrastAdjustmentToMultiplier(adjustment: number) {
+  return adjustment < 0
+    ? Math.max(0.5, 1 + adjustment * 0.5)
+    : adjustment + 1;
 }
 
 function clamp(value: number, min: number, max: number) {
