@@ -62,9 +62,19 @@ export function getDeviceColorsForPalette(
 }
 
 export const defaultPalette = getDefaultPalette("default");
+export const genericTwoColorEinkPalette = getDefaultPalette(
+  "generic-2-color-eink"
+);
+export const genericFourGrayscalePalette = getDefaultPalette(
+  "generic-4-grayscale"
+);
+export const trmnlSeeed16GrayscalePalette = getDefaultPalette(
+  "trmnl-seeed-16-grayscale"
+);
 export const gameboyPalette = getDefaultPalette("gameboy");
 export const spectra6legacyPalette = getDefaultPalette("spectra6legacy");
 export const spectra6Palette = getDefaultPalette("spectra6");
+export const spectra6BoeberPalette = getDefaultPalette("spectra6-boeber");
 export const spectra6OriginalPalette = getDefaultPalette("spectra6-original");
 export const spectra6OriginalPreviewPalette = getDefaultPalette(
   "spectra6-original-preview"
@@ -80,7 +90,9 @@ export type {
 
 export {
   applyImageAdjustments,
+  applyImageAdjustmentsPreview,
   applyImageDataAdjustments,
+  applyImageDataAdjustmentsAsync,
   ditherCanvas,
   ditherImage,
 } from "./dither/dither";
@@ -108,6 +120,9 @@ export {
 } from "./auto-processing";
 
 export type {
+  AdjustmentPreviewOptions,
+  AdjustmentProcessingEngine,
+  AdjustmentQuality,
   ClarityOptions,
   ColorMatchingMode,
   CanvasLike,

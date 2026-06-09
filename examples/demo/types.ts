@@ -1,4 +1,4 @@
-import type { ProcessingSuggestion } from "../../src";
+import type { PaletteColorEntry, ProcessingSuggestion } from "../../src";
 
 export type ScreenOrientation = "landscape" | "portrait" | "original";
 export type ImageFitMode = "contain" | "cover";
@@ -13,7 +13,7 @@ export type AutoRatingIssue =
   | "unreadable";
 
 export interface DemoConfig {
-  palette: string;
+  palette: string | PaletteColorEntry[];
   imageAdjustmentOptions: Record<string, unknown>;
   canvasDitherOptions: Record<string, unknown>;
 }

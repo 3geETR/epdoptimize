@@ -20,6 +20,7 @@ import type {
   ProcessingSuggestion,
 } from "../src";
 import {
+  CUSTOM_PALETTES_STORAGE_KEY,
   DEFAULT_DITHER_OPTIONS,
   PALETTE_OPTIONS,
 } from "./demo/constants";
@@ -83,15 +84,23 @@ import {
   orientationSelect,
   orientationToggleButtons,
   outputCanvas,
+  addPaletteColorButton,
+  clonePaletteButton,
+  newPaletteButton,
   palettePreview,
+  paletteEditorRows,
+  paletteEditorStatus,
+  paletteNameInput,
   paletteSelect,
   paperIdInput,
   processingEngineSelect,
   processingPresetSelect,
   randomDitheringTypeSelect,
   rangeFittingPreviewCanvas,
+  resetPaletteButton,
   resetImageAdjustmentsButton,
   sampleImageGrid,
+  savePaletteButton,
   saturationInput,
   screenResolutionSelect,
   scurveStrengthInput,
@@ -161,6 +170,9 @@ let autoAnalysisCache:
     }
   | null = null;
 let syncingCanvasScroll = false;
+let paletteOptions: Record<string, PaletteOption> = {};
+let storedPaletteRecords: StoredPaletteRecord[] = [];
+let draftPaletteKey: string | null = null;
 
 const FULL_AUTO_PRESET_VALUE = "auto";
 const AUTO_DITHER_PRESET_VALUE = "autoDitherManual";
@@ -187,6 +199,26 @@ const KERNEL_DITHERING_TYPES = new Set([
 ]);
 const ORDERED_DITHERING_TYPES = new Set(["ordered", "ditherItOrdered"]);
 const DITHER_IT_UNSUPPORTED_KERNELS = new Set(["falseFloydSteinberg"]);
+const DEFAULT_NEW_PALETTE: PaletteColorEntry[] = [
+  { name: "black", color: "#000000", deviceColor: "#000000" },
+  { name: "white", color: "#FFFFFF", deviceColor: "#FFFFFF" },
+];
+
+interface PaletteOption {
+  label: string;
+  exportName: string;
+  palette: PaletteColorEntry[];
+  builtIn: boolean;
+  modified: boolean;
+}
+
+interface StoredPaletteRecord {
+  key: string;
+  label: string;
+  palette: PaletteColorEntry[];
+  sourceKey?: string;
+  updatedAt?: string;
+}
 
 function isFullAutoPreset() {
   return processingPresetSelect.value === FULL_AUTO_PRESET_VALUE;
@@ -258,6 +290,458 @@ function setupWorkspaceToggleButtons(
   });
 }
 
+function clonePalette(palette: PaletteColorEntry[]): PaletteColorEntry[] {
+  return palette.map((entry) => ({ ...entry }));
+}
+
+function normalizeHexColorValue(value: string) {
+  const trimmed = value.trim();
+  const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(trimmed);
+  if (!match) return null;
+
+  const hex = match[1]!;
+  if (hex.length === 6) return `#${hex.toUpperCase()}`;
+
+  return `#${hex
+    .split("")
+    .map((channel) => channel + channel)
+    .join("")
+    .toUpperCase()}`;
+}
+
+function normalizePaletteEntries(
+  entries: unknown,
+): PaletteColorEntry[] | null {
+  if (!Array.isArray(entries)) return null;
+
+  const palette = entries
+    .map((entry, index) => {
+      if (!entry || typeof entry !== "object") return null;
+      const candidate = entry as Partial<PaletteColorEntry>;
+      const color = normalizeHexColorValue(String(candidate.color ?? ""));
+      const deviceColor = normalizeHexColorValue(
+        String(candidate.deviceColor ?? ""),
+      );
+      if (!color || !deviceColor) return null;
+
+      const name = String(candidate.name ?? "").trim() || `color${index + 1}`;
+      return { name, color, deviceColor };
+    })
+    .filter(Boolean) as PaletteColorEntry[];
+
+  return palette.length ? palette : null;
+}
+
+function isBuiltInPaletteKey(key: string) {
+  return Object.prototype.hasOwnProperty.call(PALETTE_OPTIONS, key);
+}
+
+function loadStoredPaletteRecords() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PALETTES_STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw) as unknown;
+    const records = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as { palettes?: unknown }).palettes)
+        ? (parsed as { palettes: unknown[] }).palettes
+        : [];
+
+    return records
+      .map((record) => {
+        if (!record || typeof record !== "object") return null;
+        const candidate = record as Partial<StoredPaletteRecord>;
+        const key = String(candidate.key ?? "").trim();
+        const label = String(candidate.label ?? "").trim();
+        const palette = normalizePaletteEntries(candidate.palette);
+        if (!key || !label || !palette) return null;
+
+        return {
+          key,
+          label,
+          palette,
+          ...(candidate.sourceKey
+            ? { sourceKey: String(candidate.sourceKey) }
+            : {}),
+          ...(candidate.updatedAt
+            ? { updatedAt: String(candidate.updatedAt) }
+            : {}),
+        };
+      })
+      .filter(Boolean) as StoredPaletteRecord[];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredPaletteRecords() {
+  localStorage.setItem(
+    CUSTOM_PALETTES_STORAGE_KEY,
+    JSON.stringify(storedPaletteRecords, null, 2),
+  );
+}
+
+function populatePaletteOptions(selectedKey = paletteSelect.value) {
+  paletteOptions = {};
+  paletteSelect.replaceChildren();
+
+  const builtInGroup = document.createElement("optgroup");
+  builtInGroup.label = "Built-in";
+  const customGroup = document.createElement("optgroup");
+  customGroup.label = "Custom";
+
+  for (const [key, option] of Object.entries(PALETTE_OPTIONS)) {
+    const override = storedPaletteRecords.find(
+      (record) => record.key === key && record.sourceKey === key,
+    );
+    const resolved = {
+      label: override?.label ?? option.label,
+      exportName: option.exportName,
+      palette: clonePalette(override?.palette ?? option.palette),
+      builtIn: true,
+      modified: Boolean(override),
+    };
+    paletteOptions[key] = resolved;
+
+    const selectOption = document.createElement("option");
+    selectOption.value = key;
+    selectOption.textContent = resolved.modified
+      ? `${resolved.label} (modified)`
+      : resolved.label;
+    builtInGroup.append(selectOption);
+  }
+
+  for (const record of storedPaletteRecords) {
+    if (isBuiltInPaletteKey(record.key)) continue;
+
+    paletteOptions[record.key] = {
+      label: record.label,
+      exportName: "customPalette",
+      palette: clonePalette(record.palette),
+      builtIn: false,
+      modified: true,
+    };
+
+    const selectOption = document.createElement("option");
+    selectOption.value = record.key;
+    selectOption.textContent = record.label;
+    customGroup.append(selectOption);
+  }
+
+  paletteSelect.append(builtInGroup);
+  if (customGroup.children.length) {
+    paletteSelect.append(customGroup);
+  }
+
+  paletteSelect.value =
+    selectedKey && paletteOptions[selectedKey]
+      ? selectedKey
+      : paletteOptions["aitjcize-spectra6"]
+        ? "aitjcize-spectra6"
+        : Object.keys(paletteOptions)[0] ?? "";
+}
+
+function setPaletteEditorStatus(message: string, state = "") {
+  paletteEditorStatus.textContent = message;
+  paletteEditorStatus.dataset.state = state;
+}
+
+function createPaletteColorInputs(field: "color" | "deviceColor", value: string) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "color-input-pair";
+
+  const colorInput = document.createElement("input");
+  colorInput.type = "color";
+  colorInput.value = normalizeHexColorValue(value) ?? "#000000";
+  colorInput.setAttribute(
+    "aria-label",
+    field === "color" ? "Calibrated color picker" : "Device color picker",
+  );
+
+  const textInput = document.createElement("input");
+  textInput.type = "text";
+  textInput.value = normalizeHexColorValue(value) ?? "#000000";
+  textInput.dataset.paletteField = field;
+  textInput.setAttribute(
+    "aria-label",
+    field === "color" ? "Calibrated color hex" : "Device color hex",
+  );
+
+  colorInput.addEventListener("input", () => {
+    textInput.value = colorInput.value.toUpperCase();
+    setPaletteEditorStatus("Unsaved palette changes.");
+  });
+  textInput.addEventListener("input", () => {
+    const normalized = normalizeHexColorValue(textInput.value);
+    if (normalized) colorInput.value = normalized;
+    setPaletteEditorStatus("Unsaved palette changes.");
+  });
+
+  wrapper.append(colorInput, textInput);
+  return wrapper;
+}
+
+function createTrashIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute(
+    "d",
+    "M3 6h18M8 6V4h8v2m-10 0 1 14h10l1-14M10 11v5m4-5v5",
+  );
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+
+  svg.append(path);
+  return svg;
+}
+
+function renderPaletteEditorRows(palette: PaletteColorEntry[]) {
+  paletteEditorRows.replaceChildren(
+    ...palette.map((entry, index) => {
+      const row = document.createElement("div");
+      row.className = "palette-editor-row";
+
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.value = entry.name;
+      nameInput.dataset.paletteField = "name";
+      nameInput.setAttribute("aria-label", "Color role");
+      nameInput.addEventListener("input", () => {
+        setPaletteEditorStatus("Unsaved palette changes.");
+      });
+
+      const removeButton = document.createElement("button");
+      removeButton.className = "icon-button";
+      removeButton.type = "button";
+      removeButton.setAttribute("aria-label", `Remove color ${index + 1}`);
+      removeButton.title = `Remove color ${index + 1}`;
+      removeButton.append(createTrashIcon());
+      removeButton.addEventListener("click", () => {
+        row.remove();
+        setPaletteEditorStatus("Unsaved palette changes.");
+      });
+
+      row.append(
+        nameInput,
+        createPaletteColorInputs("color", entry.color),
+        createPaletteColorInputs("deviceColor", entry.deviceColor),
+        removeButton,
+      );
+      return row;
+    }),
+  );
+}
+
+function renderPaletteEditor() {
+  draftPaletteKey = null;
+  const selectedPalette = getSelectedPaletteOption();
+  paletteNameInput.value = selectedPalette.label;
+  renderPaletteEditorRows(selectedPalette.palette);
+
+  resetPaletteButton.textContent = selectedPalette.builtIn ? "Reset" : "Delete";
+  resetPaletteButton.disabled =
+    selectedPalette.builtIn && !selectedPalette.modified;
+  setPaletteEditorStatus(
+    selectedPalette.modified
+      ? "Saved in this browser."
+      : "Built-in palette. Save to store local edits.",
+  );
+}
+
+function readPaletteEditorPalette() {
+  const rows = Array.from(
+    paletteEditorRows.querySelectorAll<HTMLElement>(".palette-editor-row"),
+  );
+  const entries = rows.map((row, index) => {
+    const nameInput = row.querySelector<HTMLInputElement>(
+      '[data-palette-field="name"]',
+    );
+    const colorInput = row.querySelector<HTMLInputElement>(
+      '[data-palette-field="color"]',
+    );
+    const deviceColorInput = row.querySelector<HTMLInputElement>(
+      '[data-palette-field="deviceColor"]',
+    );
+    const color = normalizeHexColorValue(colorInput?.value ?? "");
+    const deviceColor = normalizeHexColorValue(deviceColorInput?.value ?? "");
+
+    return {
+      name: nameInput?.value.trim() || `color${index + 1}`,
+      color,
+      deviceColor,
+    };
+  });
+
+  if (!entries.length) {
+    throw new Error("Add at least one palette color.");
+  }
+
+  const invalid = entries.find((entry) => !entry.color || !entry.deviceColor);
+  if (invalid) {
+    throw new Error("Use valid hex colors such as #1F2226.");
+  }
+
+  return entries.map((entry) => ({
+    name: entry.name,
+    color: entry.color!,
+    deviceColor: entry.deviceColor!,
+  }));
+}
+
+function getUniqueCustomPaletteKey(label: string) {
+  const base =
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "custom-palette";
+  let key = `custom:${base}`;
+  let suffix = 2;
+
+  while (
+    isBuiltInPaletteKey(key) ||
+    storedPaletteRecords.some((record) => record.key === key)
+  ) {
+    key = `custom:${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  return key;
+}
+
+function upsertStoredPaletteRecord(record: StoredPaletteRecord) {
+  const index = storedPaletteRecords.findIndex(
+    (candidate) => candidate.key === record.key,
+  );
+  if (index === -1) {
+    storedPaletteRecords.push(record);
+    return;
+  }
+
+  storedPaletteRecords[index] = record;
+}
+
+function startNewPalette() {
+  draftPaletteKey = getUniqueCustomPaletteKey("Custom palette");
+  paletteNameInput.value = "Custom palette";
+  renderPaletteEditorRows(DEFAULT_NEW_PALETTE);
+  resetPaletteButton.textContent = "Reset";
+  resetPaletteButton.disabled = false;
+  setPaletteEditorStatus("New palette draft. Save to keep it in this browser.");
+}
+
+function cloneSelectedPalette() {
+  const selectedPalette = getSelectedPaletteOption();
+  draftPaletteKey = getUniqueCustomPaletteKey(`${selectedPalette.label} copy`);
+  paletteNameInput.value = `${selectedPalette.label} copy`;
+  renderPaletteEditorRows(selectedPalette.palette);
+  resetPaletteButton.textContent = "Reset";
+  resetPaletteButton.disabled = false;
+  setPaletteEditorStatus("Cloned palette draft. Save to keep it in this browser.");
+}
+
+function savePaletteEditor() {
+  try {
+    const selectedKey = paletteSelect.value;
+    const selectedPalette = getSelectedPaletteOption();
+    const label =
+      paletteNameInput.value.trim() ||
+      (draftPaletteKey ? "Custom palette" : selectedPalette.label);
+    const palette = readPaletteEditorPalette();
+    const key = draftPaletteKey ?? selectedKey;
+    const sourceKey = draftPaletteKey
+      ? selectedKey
+      : selectedPalette.builtIn
+        ? selectedKey
+        : undefined;
+
+    upsertStoredPaletteRecord({
+      key,
+      label,
+      palette,
+      ...(sourceKey ? { sourceKey } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    saveStoredPaletteRecords();
+    draftPaletteKey = null;
+    autoAnalysisCache = null;
+    populatePaletteOptions(key);
+    renderPaletteEditor();
+    refreshControlState();
+    setPaletteEditorStatus("Palette saved in this browser.");
+    scheduleProcessImage();
+  } catch (error) {
+    setPaletteEditorStatus(
+      error instanceof Error ? error.message : "Unable to save palette.",
+      "error",
+    );
+  }
+}
+
+function resetPaletteEditor() {
+  if (draftPaletteKey) {
+    renderPaletteEditor();
+    return;
+  }
+
+  const selectedKey = paletteSelect.value;
+  const selectedPalette = getSelectedPaletteOption();
+  storedPaletteRecords = storedPaletteRecords.filter(
+    (record) => record.key !== selectedKey,
+  );
+  saveStoredPaletteRecords();
+  autoAnalysisCache = null;
+  populatePaletteOptions(selectedPalette.builtIn ? selectedKey : undefined);
+  renderPaletteEditor();
+  refreshControlState();
+  setPaletteEditorStatus(
+    selectedPalette.builtIn
+      ? "Local palette edits were reset."
+      : "Custom palette deleted.",
+  );
+  scheduleProcessImage();
+}
+
+function addPaletteEditorColor() {
+  const palette = readPaletteEditorPaletteDraft();
+  const nextIndex = palette.length + 1;
+  palette.push({
+    name: `color${nextIndex}`,
+    color: "#808080",
+    deviceColor: "#808080",
+  });
+  renderPaletteEditorRows(palette);
+  setPaletteEditorStatus("Unsaved palette changes.");
+}
+
+function readPaletteEditorPaletteDraft() {
+  return Array.from(
+    paletteEditorRows.querySelectorAll<HTMLElement>(".palette-editor-row"),
+  ).map((row, index) => {
+    const nameInput = row.querySelector<HTMLInputElement>(
+      '[data-palette-field="name"]',
+    );
+    const colorInput = row.querySelector<HTMLInputElement>(
+      '[data-palette-field="color"]',
+    );
+    const deviceColorInput = row.querySelector<HTMLInputElement>(
+      '[data-palette-field="deviceColor"]',
+    );
+
+    return {
+      name: nameInput?.value.trim() || `color${index + 1}`,
+      color: colorInput?.value || "#000000",
+      deviceColor: deviceColorInput?.value || "#000000",
+    };
+  });
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
   setupCanvasDownloads();
   setupWorkspaceToggleButtons(
@@ -271,6 +755,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     "imageFitOption",
   );
   populateSampleImageOptions();
+  storedPaletteRecords = loadStoredPaletteRecords();
+  populatePaletteOptions("aitjcize-spectra6");
+  renderPaletteEditor();
   populateProcessingPresetOptions();
   loadDeviceTestConfig();
   syncWorkspaceToggleControls();
@@ -765,10 +1252,12 @@ function numberArraysEqual(a: number[], b: number[]) {
 }
 
 function getSelectedPaletteOption() {
-  return (
-    PALETTE_OPTIONS[paletteSelect.value as keyof typeof PALETTE_OPTIONS] ??
-    PALETTE_OPTIONS["aitjcize-spectra6"]
-  );
+  const option =
+    paletteOptions[paletteSelect.value] ??
+    paletteOptions["aitjcize-spectra6"] ??
+    Object.values(paletteOptions)[0];
+  if (!option) throw new Error("No palette options are available.");
+  return option;
 }
 
 function updatePalettePreviews() {
@@ -1028,6 +1517,7 @@ function getSelectedAutoCanvasDitherOptions() {
 
 function getAutoAnalysisCacheKey() {
   const screenResolution = getSelectedScreenResolution();
+  const selectedPalette = getSelectedPaletteOption();
   return JSON.stringify({
     image: lastImage
       ? {
@@ -1042,6 +1532,7 @@ function getAutoAnalysisCacheKey() {
     orientation: getSelectedOrientation(),
     imageFit: getSelectedImageFit(),
     palette: paletteSelect.value,
+    paletteEntries: selectedPalette.palette,
     canvasWidth: inputCanvas.width,
     canvasHeight: inputCanvas.height,
   });
@@ -1295,16 +1786,33 @@ function getDemoConfig(): DemoConfig {
   const selectedPalette = getSelectedPaletteOption();
 
   return {
-    palette: selectedPalette.exportName,
+    palette:
+      selectedPalette.builtIn && !selectedPalette.modified
+        ? selectedPalette.exportName
+        : selectedPalette.palette,
     imageAdjustmentOptions: getConfigImageAdjustmentOptionsFromUI(),
     canvasDitherOptions: getConfigCanvasDitherOptionsFromUI(),
   };
 }
 
+function getPaletteExampleImport(option: PaletteOption) {
+  return option.builtIn && !option.modified ? `  ${option.exportName},\n` : "";
+}
+
+function getPaletteExampleDeclaration(option: PaletteOption) {
+  if (option.builtIn && !option.modified) {
+    return `const palette = ${option.exportName};`;
+  }
+
+  return `const palette = ${JSON.stringify(option.palette, null, 2)};`;
+}
+
 function updateConfigOutput() {
   const config = getDemoConfig();
   const configJson = JSON.stringify(config, null, 2);
-  const paletteExportName = getSelectedPaletteOption().exportName;
+  const selectedPalette = getSelectedPaletteOption();
+  const paletteImport = getPaletteExampleImport(selectedPalette);
+  const paletteDeclaration = getPaletteExampleDeclaration(selectedPalette);
   const shouldSuggestFullAuto = isFullAutoPreset() && !autoControlsDirty;
   const shouldSuggestCanvasDither = isAutoDitherPreset() && !autoControlsDirty;
 
@@ -1316,10 +1824,10 @@ function updateConfigOutput() {
   replaceColors,
   suggestCanvasDitherOptions,
   suggestCanvasImageAdjustmentOptions,
-  ${paletteExportName},
+${paletteImport}
 } from "epdoptimize";
 
-const palette = ${paletteExportName};
+${paletteDeclaration}
 
 const inputCanvas = document.querySelector("#inputCanvas");
 const ditheredCanvas = document.querySelector("#ditheredCanvas");
@@ -1341,10 +1849,10 @@ replaceColors(ditheredCanvas, deviceCanvas, palette);`;
   replaceColors,
   suggestCanvasDitherOptions,
   suggestCanvasImageAdjustmentOptions,
-  ${paletteExportName},
+${paletteImport}
 } from "epdoptimize";
 
-const palette = ${paletteExportName};
+${paletteDeclaration}
 
 const inputCanvas = document.querySelector("#inputCanvas");
 const adjustedCanvas = document.createElement("canvas");
@@ -1373,11 +1881,11 @@ replaceColors(ditheredCanvas, deviceCanvas, palette);`;
   ditherImage,
   replaceColors,
   suggestCanvasDitherOptions,
-  ${paletteExportName},
+${paletteImport}
 } from "epdoptimize";
 
 const config = ${configJson};
-const palette = ${paletteExportName};
+${paletteDeclaration}
 
 const inputCanvas = document.querySelector("#inputCanvas");
 const ditheredCanvas = document.querySelector("#ditheredCanvas");
@@ -1397,11 +1905,11 @@ replaceColors(ditheredCanvas, deviceCanvas, palette);`;
   ditherCanvas,
   replaceColors,
   suggestCanvasDitherOptions,
-  ${paletteExportName},
+${paletteImport}
 } from "epdoptimize";
 
 const config = ${configJson};
-const palette = ${paletteExportName};
+${paletteDeclaration}
 
 const inputCanvas = document.querySelector("#inputCanvas");
 const adjustedCanvas = document.createElement("canvas");
@@ -1427,11 +1935,11 @@ replaceColors(ditheredCanvas, deviceCanvas, palette);`;
   jsExampleOutput.textContent = `import {
   ditherImage,
   replaceColors,
-  ${paletteExportName},
+${paletteImport}
 } from "epdoptimize";
 
 const config = ${configJson};
-const palette = ${paletteExportName};
+${paletteDeclaration}
 
 const inputCanvas = document.querySelector("#inputCanvas");
 const ditheredCanvas = document.querySelector("#ditheredCanvas");
@@ -1448,11 +1956,11 @@ replaceColors(ditheredCanvas, deviceCanvas, palette);`;
   applyImageAdjustments,
   ditherCanvas,
   replaceColors,
-  ${paletteExportName},
+${paletteImport}
 } from "epdoptimize";
 
 const config = ${configJson};
-const palette = ${paletteExportName};
+${paletteDeclaration}
 
 const inputCanvas = document.querySelector("#inputCanvas");
 const adjustedCanvas = document.createElement("canvas");
@@ -1888,6 +2396,10 @@ controls.forEach((el) => {
     if (el === autoFlowSelect || el === paletteSelect) {
       autoControlsDirty = false;
     }
+    if (el === paletteSelect) {
+      draftPaletteKey = null;
+      renderPaletteEditor();
+    }
     scheduleProcessImage();
   });
 
@@ -1899,6 +2411,15 @@ controls.forEach((el) => {
       scheduleProcessImage();
     });
   }
+});
+
+newPaletteButton.addEventListener("click", startNewPalette);
+clonePaletteButton.addEventListener("click", cloneSelectedPalette);
+savePaletteButton.addEventListener("click", savePaletteEditor);
+resetPaletteButton.addEventListener("click", resetPaletteEditor);
+addPaletteColorButton.addEventListener("click", addPaletteEditorColor);
+paletteNameInput.addEventListener("input", () => {
+  setPaletteEditorStatus("Unsaved palette changes.");
 });
 
 autoAdjustmentsButton.addEventListener("click", () => {

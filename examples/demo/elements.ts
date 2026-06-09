@@ -61,6 +61,18 @@ export const deviceTestStatus = $("deviceTestStatus") as HTMLParagraphElement;
 export const paletteSelect = $("paletteSelect") as HTMLSelectElement;
 export const palettePreview = $("palettePreview") as HTMLDivElement;
 export const deviceColorsPreview = $("deviceColorsPreview") as HTMLDivElement;
+export const paletteNameInput = $("paletteName") as HTMLInputElement;
+export const paletteEditorRows = $("paletteEditorRows") as HTMLDivElement;
+export const newPaletteButton = $("newPaletteButton") as HTMLButtonElement;
+export const clonePaletteButton = $("clonePaletteButton") as HTMLButtonElement;
+export const savePaletteButton = $("savePaletteButton") as HTMLButtonElement;
+export const resetPaletteButton = $("resetPaletteButton") as HTMLButtonElement;
+export const addPaletteColorButton = $(
+  "addPaletteColorButton",
+) as HTMLButtonElement;
+export const paletteEditorStatus = $(
+  "paletteEditorStatus",
+) as HTMLParagraphElement;
 export const processingPresetSelect = $(
   "processingPreset",
 ) as HTMLSelectElement;

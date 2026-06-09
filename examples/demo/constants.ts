@@ -3,15 +3,20 @@ import {
   aitjcizeSpectra6Palette,
   defaultPalette,
   gameboyPalette,
+  genericFourGrayscalePalette,
+  genericTwoColorEinkPalette,
+  spectra6BoeberPalette,
   spectra6OriginalPalette,
   spectra6OriginalPreviewPalette,
   spectra6legacyPalette,
   spectra6Palette,
+  trmnlSeeed16GrayscalePalette,
 } from "../../src";
 import type { ImageFitMode, ScreenOrientation } from "./types";
 
 export const DEVICE_TEST_STORAGE_KEY = "epdoptimize:device-test";
 export const AUTO_RATING_STORAGE_KEY = "epdoptimize:auto-ratings:v1";
+export const CUSTOM_PALETTES_STORAGE_KEY = "epdoptimize:custom-palettes:v1";
 
 export const SCREEN_RESOLUTIONS = {
   spectra6_1_54: {
@@ -126,6 +131,21 @@ export const PALETTE_OPTIONS = {
     exportName: "defaultPalette",
     palette: defaultPalette,
   },
+  "generic-2-color-eink": {
+    label: "2 Color eInk (generic)",
+    exportName: "genericTwoColorEinkPalette",
+    palette: genericTwoColorEinkPalette,
+  },
+  "generic-4-grayscale": {
+    label: "4 Grayscale (generic)",
+    exportName: "genericFourGrayscalePalette",
+    palette: genericFourGrayscalePalette,
+  },
+  "trmnl-seeed-16-grayscale": {
+    label: "16 Grayscale (TRMNL / Seeed Studio)",
+    exportName: "trmnlSeeed16GrayscalePalette",
+    palette: trmnlSeeed16GrayscalePalette,
+  },
   "aitjcize-spectra6": {
     label: "aitjcize Spectra 6",
     exportName: "aitjcizeSpectra6Palette",
@@ -135,6 +155,11 @@ export const PALETTE_OPTIONS = {
     label: "Spectra 6 (legacy)",
     exportName: "spectra6Palette",
     palette: spectra6Palette,
+  },
+  "spectra6-boeber": {
+    label: "Spectra 6 Böber",
+    exportName: "spectra6BoeberPalette",
+    palette: spectra6BoeberPalette,
   },
   "spectra6-original": {
     label: "Spectra 6 Original (no replace)",

@@ -3,6 +3,34 @@
     { "name": "black", "color": "#000", "deviceColor": "#212121" },
     { "name": "white", "color": "#fff", "deviceColor": "#e6e6e6" }
   ],
+  "generic-2-color-eink": [
+    { "name": "black", "color": "#000000", "deviceColor": "#000000" },
+    { "name": "white", "color": "#FFFFFF", "deviceColor": "#FFFFFF" }
+  ],
+  "generic-4-grayscale": [
+    { "name": "black", "color": "#000000", "deviceColor": "#000000" },
+    { "name": "gray1", "color": "#555555", "deviceColor": "#555555" },
+    { "name": "gray2", "color": "#AAAAAA", "deviceColor": "#AAAAAA" },
+    { "name": "white", "color": "#FFFFFF", "deviceColor": "#FFFFFF" }
+  ],
+  "trmnl-seeed-16-grayscale": [
+    { "name": "black", "color": "#000000", "deviceColor": "#000000" },
+    { "name": "gray1", "color": "#111111", "deviceColor": "#111111" },
+    { "name": "gray2", "color": "#222222", "deviceColor": "#222222" },
+    { "name": "gray3", "color": "#333333", "deviceColor": "#333333" },
+    { "name": "gray4", "color": "#444444", "deviceColor": "#444444" },
+    { "name": "gray5", "color": "#555555", "deviceColor": "#555555" },
+    { "name": "gray6", "color": "#666666", "deviceColor": "#666666" },
+    { "name": "gray7", "color": "#777777", "deviceColor": "#777777" },
+    { "name": "gray8", "color": "#888888", "deviceColor": "#888888" },
+    { "name": "gray9", "color": "#999999", "deviceColor": "#999999" },
+    { "name": "gray10", "color": "#AAAAAA", "deviceColor": "#AAAAAA" },
+    { "name": "gray11", "color": "#BBBBBB", "deviceColor": "#BBBBBB" },
+    { "name": "gray12", "color": "#CCCCCC", "deviceColor": "#CCCCCC" },
+    { "name": "gray13", "color": "#DDDDDD", "deviceColor": "#DDDDDD" },
+    { "name": "gray14", "color": "#EEEEEE", "deviceColor": "#EEEEEE" },
+    { "name": "white", "color": "#FFFFFF", "deviceColor": "#FFFFFF" }
+  ],
   "aitjcize-spectra6": [
     { "name": "black", "color": "#020202", "deviceColor": "#000000" },
     { "name": "white", "color": "#BEC8C8", "deviceColor": "#FFFFFF" },
@@ -32,6 +60,14 @@
     { "name": "green", "color": "#35563A", "deviceColor": "#00FF00" },
     { "name": "red", "color": "#62201E", "deviceColor": "#FF0000" },
     { "name": "yellow", "color": "#C1BB1E", "deviceColor": "#FFFF00" }
+  ],
+  "spectra6-boeber": [
+    { "name": "black", "color": "#1f2226", "deviceColor": "#000000" },
+    { "name": "white", "color": "#d6d6d6", "deviceColor": "#FFFFFF" },
+    { "name": "blue", "color": "#416ce1", "deviceColor": "#0000FF" },
+    { "name": "green", "color": "#067406", "deviceColor": "#00FF00" },
+    { "name": "red", "color": "#ea4843", "deviceColor": "#FF0000" },
+    { "name": "yellow", "color": "#dbd529", "deviceColor": "#FFFF00" }
   ],
   "spectra6-original": [
     { "name": "black", "color": "#000000", "deviceColor": "#000000" },

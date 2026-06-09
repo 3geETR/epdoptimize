@@ -566,6 +566,17 @@
         min-width: 0;
       }
 
+      input[type="color"] {
+        width: 2.25rem;
+        min-width: 2.25rem;
+        height: 2rem;
+        padding: 0.15rem;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--panel-deep);
+        cursor: pointer;
+      }
+
       input[type="file"]::file-selector-button {
         width: auto;
         margin-right: 0.75rem;
@@ -582,6 +593,71 @@
         gap: 1rem;
         align-items: start;
         align-content: start;
+      }
+
+      .palette-editor {
+        display: grid;
+        gap: 0.55rem;
+        grid-column: 1 / -1;
+        padding: 0.55rem;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--panel-deep);
+      }
+
+      .palette-editor summary {
+        color: var(--ink);
+        font-size: 0.78rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .palette-editor[open] summary {
+        margin-bottom: 0.05rem;
+      }
+
+      .palette-editor-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.4rem;
+      }
+
+      .palette-editor-rows {
+        display: grid;
+        gap: 0.42rem;
+      }
+
+      .palette-editor-row {
+        display: grid;
+        grid-template-columns: minmax(4rem, 1.1fr) minmax(6.8rem, 1fr) minmax(
+            6.8rem,
+            1fr
+          ) auto;
+        gap: 0.35rem;
+        align-items: center;
+      }
+
+      .color-input-pair {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 0.3rem;
+        align-items: center;
+      }
+
+      .palette-editor-row input[type="text"] {
+        min-width: 0;
+        font-size: 0.76rem;
+      }
+
+      .palette-editor-status {
+        min-height: 1rem;
+        color: var(--muted);
+        font-size: 0.72rem;
+        line-height: 1.25;
+      }
+
+      .palette-editor-status[data-state="error"] {
+        color: var(--danger);
       }
 
       .workspace-tools {
@@ -987,6 +1063,11 @@
           width: 100%;
         }
 
+        .palette-editor-actions,
+        .palette-editor-row {
+          grid-template-columns: 1fr;
+        }
+
         .sample-grid {
           display: flex;
           gap: 0.45rem;
@@ -1082,10 +1163,20 @@
                 <label for="paletteSelect">Palette</label>
                 <select id="paletteSelect">
                   <option value="default">Default</option>
+                  <option value="generic-2-color-eink">
+                    2 Color eInk (generic)
+                  </option>
+                  <option value="generic-4-grayscale">
+                    4 Grayscale (generic)
+                  </option>
+                  <option value="trmnl-seeed-16-grayscale">
+                    16 Grayscale (TRMNL / Seeed Studio)
+                  </option>
                   <option value="aitjcize-spectra6" selected>
                     aitjcize Spectra 6
                   </option>
                   <option value="spectra6">Spectra 6</option>
+                  <option value="spectra6-boeber">Spectra 6 Böber</option>
                   <option value="spectra6-original">
                     Spectra 6 Original (no replace)
                   </option>
@@ -1106,6 +1197,48 @@
                   class="palette-strip"
                   aria-label="Selected device colors"
                 ></div>
+                <details class="palette-editor" aria-label="Palette editor">
+                  <summary>Customize palette</summary>
+                  <label for="paletteName">Palette name</label>
+                  <input id="paletteName" type="text" autocomplete="off" />
+                  <div class="palette-editor-actions">
+                    <button id="newPaletteButton" class="button" type="button">
+                      New
+                    </button>
+                    <button id="clonePaletteButton" class="button" type="button">
+                      Clone
+                    </button>
+                    <button id="savePaletteButton" class="button" type="button">
+                      Save
+                    </button>
+                  </div>
+                  <div
+                    id="paletteEditorRows"
+                    class="palette-editor-rows"
+                    aria-label="Palette colors"
+                  ></div>
+                  <div class="palette-editor-actions">
+                    <button
+                      id="addPaletteColorButton"
+                      class="button"
+                      type="button"
+                    >
+                      Add color
+                    </button>
+                    <button
+                      id="resetPaletteButton"
+                      class="button"
+                      type="button"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <p
+                    id="paletteEditorStatus"
+                    class="palette-editor-status"
+                    role="status"
+                  ></p>
+                </details>
               </div>
             </div>
           </fieldset>

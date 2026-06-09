@@ -423,6 +423,82 @@ await applyImageAdjustments(sourceCanvas, adjustedCanvas, {
 });
 ```
 
+Use this for final-quality adjustment renders. It preserves the source canvas
+size and uses the same adjustment quality as `ditherImage`.
+
+### `applyImageDataAdjustmentsAsync(imageData, options)`
+
+Asynchronously runs only the image adjustment stage on `ImageData`. This is the
+recommended low-level API for interactive editors that already manage their own
+canvas read/write cycle.
+
+```js
+import { applyImageDataAdjustmentsAsync } from "epdoptimize";
+
+const previewImageData = await applyImageDataAdjustmentsAsync(imageData, {
+  adjustmentEngine: "auto",
+  preview: {
+    mode: "fast",
+    maxLongEdge: 1024,
+    maxPixels: 700_000,
+  },
+  toneMapping,
+  clarity,
+  dynamicRangeCompression: {
+    mode: "auto",
+    strength: 0.8,
+    quality: "fast",
+  },
+});
+```
+
+`adjustmentEngine: "auto"` uses a browser Worker for larger images when one is
+available, transfers the `ImageData` buffer to avoid copying, and falls back to
+the JavaScript path in environments without Worker support. The `"wasm"`
+adjustment engine is reserved for future adjustment kernels and currently falls
+back to JavaScript.
+
+For final output, request final mode or omit `preview`:
+
+```js
+const finalImageData = await applyImageDataAdjustmentsAsync(imageData, {
+  adjustmentEngine: "worker",
+  preview: { mode: "final" },
+  toneMapping,
+  clarity,
+  dynamicRangeCompression: {
+    mode: "auto",
+    strength: 0.8,
+    quality: "accurate",
+  },
+});
+```
+
+### `applyImageAdjustmentsPreview(sourceCanvas, destinationCanvas, options)`
+
+Convenience canvas helper for slider-driven previews. It reads from
+`sourceCanvas`, applies adjustments asynchronously, and writes a preview-sized
+result to `destinationCanvas`.
+
+```js
+import { applyImageAdjustmentsPreview } from "epdoptimize";
+
+await applyImageAdjustmentsPreview(sourceCanvas, previewCanvas, {
+  adjustmentEngine: "auto",
+  preview: {
+    mode: "fast",
+    maxLongEdge: 900,
+  },
+  toneMapping,
+  dynamicRangeCompression: { mode: "auto", quality: "fast" },
+});
+```
+
+Fast preview mode may downscale before processing, uses the faster luma dynamic
+range path, and skips clarity by default because clarity is the most expensive
+local operation. Final mode preserves dimensions and the existing high-quality
+LAB behavior.
+
 ### `ditherCanvas(sourceCanvas, destinationCanvas, options)`
 
 Runs only the canvas dither and color matching stage. This is useful when image
@@ -561,9 +637,13 @@ options)`. The ImageData variants of the split helpers are
 ```js
 import {
   defaultPalette,
+  genericTwoColorEinkPalette,
+  genericFourGrayscalePalette,
+  trmnlSeeed16GrayscalePalette,
   gameboyPalette,
   spectra6legacyPalette,
   spectra6Palette,
+  spectra6BoeberPalette,
   spectra6OriginalPalette,
   spectra6OriginalPreviewPalette,
   aitjcizeSpectra6Palette,
@@ -613,6 +693,8 @@ import {
 | `processingPreset`        | string                              | `undefined`        | Preset name. Options: `balanced`, `dynamic`, `vivid`, `soft`, `grayscale`, `restore`, `posterScan`. Presets fill tone mapping, dynamic range compression, color matching, and diffusion defaults unless overridden. Use `suggestProcessingOptions` for automatic selection.                                                                               |
 | `ditheringType`           | string                              | `"errorDiffusion"` | Main dithering mode. Options: `errorDiffusion`, `ordered`, `random`, `quantizationOnly`, `hueMix`, `blueNoise`, `simple2D`, `riemersma`, plus DitherIt-backed aliases `ditherItErrorDiffusion`, `ditherItOrdered`, `ditherItBlueNoise`, `ditherItSimple2D`, and `ditherItRiemersma`. `hueMix` is experimental and targets smooth synthetic hue gradients. |
 | `processingEngine`        | string                              | `"auto"`           | Processing engine. Options: `js`, `wasm`, `auto`. WASM currently accelerates RGB error diffusion and falls back to JS for unsupported combinations.                                                                                                                                                                                                       |
+| `adjustmentEngine`        | string                              | `"auto"`           | Adjustment engine for async adjustment APIs. Options: `auto`, `js`, `worker`, `wasm`. `auto` uses a Worker for larger images when available; `wasm` is reserved for future adjustment kernels and currently falls back to JS.                                                                                                                             |
+| `preview`                 | object                              | `undefined`        | Preview controls for async adjustment APIs. Use `{ mode: "fast" \| "final", maxPixels?: number, maxLongEdge?: number }`. Fast mode can downscale and use cheaper adjustment paths; final mode preserves full dimensions and quality.                                                                                                                       |
 | `errorDiffusionMatrix`    | string                              | `"floydSteinberg"` | Error diffusion kernel. Options include `floydSteinberg`, `atkinson`, `falseFloydSteinberg`, `jarvis`, `jarvisJudiceNinke`, `stucki`, `burkes`, `sierra3`, `sierra2`, `sierra2-4a`, `fan`, `shiauFan`, `shiauFan2`.                                                                                                                                       |
 | `algorithm`               | string                              | `undefined`        | Backwards-compatible alias for `errorDiffusionMatrix`.                                                                                                                                                                                                                                                                                                    |
 | `serpentine`              | boolean                             | `false`            | Alternates scan direction on each row for error diffusion.                                                                                                                                                                                                                                                                                                |
@@ -623,7 +705,7 @@ import {
 | `paperNormalization`      | object                              | `undefined`        | Optional scan cleanup. `{ mode: "warmPaper" }` neutralizes warm low-saturation paper, anchors dark neutral ink, and preserves red poster ink before tone mapping.                                                                                                                                                                                         |
 | `clarity`                 | object                              | `undefined`        | Midtone local-contrast adjustment before tone and range fitting. Use `{ amount: -1..1, radius?: 1..4, midtone?: number }`; positive values sharpen local contrast and negative values soften it.                                                                                                                                                          |
 | `toneMapping`             | object                              | `undefined`        | Exposure, saturation, contrast, or S-curve preprocessing.                                                                                                                                                                                                                                                                                                 |
-| `dynamicRangeCompression` | object / boolean                    | `undefined`        | LAB lightness compression. Use `{ mode: "display" }`, `{ mode: "auto" }`, or `{ mode: "off" }`. Auto suggestions enable `preserveWhite` so p99/background-white pixels are not pushed below the palette white during range fitting.                                                                                                                       |
+| `dynamicRangeCompression` | object / boolean                    | `undefined`        | LAB lightness compression. Use `{ mode: "display" }`, `{ mode: "auto" }`, or `{ mode: "off" }`. `quality: "fast"` uses a faster luma approximation for previews; `quality: "accurate"` keeps the LAB path. Auto suggestions enable `preserveWhite` so p99/background-white pixels are not pushed below the palette white during range fitting.              |
 | `levelCompression`        | object                              | `undefined`        | Optional legacy/preprocessing range remap with `perChannel` or `luma` mode.                                                                                                                                                                                                                                                                               |
 | `edgePreservation`        | object                              | `undefined`        | Optional edge-core cleanup after dithering. Use `{ enabled: true, strength?: 0..1, threshold?: number, radius?: number }` to replace strong text/line-art edges with direct palette quantization.                                                                                                                                                         |
 | `edgeAntialiasing`        | object                              | `undefined`        | Optional antialiased edge-band cleanup after dithering. Use `{ enabled: true, strength?: 0..1, threshold?: number, bandRadius?: number, localRadius?: number }` to constrain transition bands to nearby palette colors.                                                                                                                                   |

@@ -25,8 +25,7 @@ import {
   getProcessingPreset,
   luma709,
   rgbToLab,
-  toRGB,
-  toScalar,
+  type AdjustmentQuality,
   type ClarityOptions,
   type ColorMatchingMode,
   type DynamicRangeCompressionOptions,
@@ -48,6 +47,12 @@ import {
   type PaletteColorEntry,
   type PaletteRegistry,
 } from "./functions/palette-order";
+import {
+  applyImageDataAdjustmentsInWorker,
+  getPreviewImageData,
+  shouldUseAdjustmentWorker,
+  waitForAdjustmentTurn,
+} from "./adjustment-async";
 
 export type DitheringType =
   | "errorDiffusion"
@@ -66,6 +71,13 @@ export type DitheringType =
   | (string & {});
 
 export type DitherProcessingEngine = "js" | "wasm" | "auto";
+export type AdjustmentProcessingEngine = "auto" | "js" | "worker" | "wasm";
+
+export interface AdjustmentPreviewOptions {
+  maxPixels?: number;
+  maxLongEdge?: number;
+  mode?: "fast" | "final";
+}
 
 export interface DitherImageOptions {
   /**
@@ -84,6 +96,21 @@ export interface DitherImageOptions {
    * and fall back to JS for unsupported modes.
    */
   processingEngine?: DitherProcessingEngine;
+
+  /**
+   * Processing engine for image adjustments.
+   *
+   * Default: "auto". "worker" and "auto" move supported async adjustment calls
+   * off the main thread where browser Workers are available. "wasm" is
+   * reserved for future adjustment kernels and currently falls back to JS.
+   */
+  adjustmentEngine?: AdjustmentProcessingEngine;
+
+  /**
+   * Preview controls for interactive editors. Final mode preserves current
+   * quality; fast mode can downscale and use cheaper adjustment paths.
+   */
+  preview?: AdjustmentPreviewOptions;
 
   /** Error diffusion kernel (e.g. `floydSteinberg`). */
   errorDiffusionMatrix?: string;
@@ -209,6 +236,7 @@ export interface CanvasLike {
 
 export type {
   ClarityOptions,
+  AdjustmentQuality,
   ColorMatchingMode,
   DynamicRangeCompressionOptions,
   ImageProcessingOptions,
@@ -237,6 +265,7 @@ const defaultOptions: Required<
     | "palette"
     | "colorMatching"
     | "processingEngine"
+    | "adjustmentEngine"
     | "sampleColorsFromImage"
     | "numberOfSampleColors"
   >
@@ -254,130 +283,10 @@ const defaultOptions: Required<
   palette: "default",
   colorMatching: "rgb",
   processingEngine: "auto",
+  adjustmentEngine: "auto",
 
   sampleColorsFromImage: false,
   numberOfSampleColors: 10,
-};
-
-const shouldEnableLevelCompression = (
-  image: ImageDataLike,
-  mode: Exclude<LevelCompressionMode, "off">,
-  black: LevelRGB | undefined,
-  white: LevelRGB | undefined,
-  autoThreshold: number
-) => {
-  const data = image.data;
-  const pixelCount = Math.floor(data.length / 4);
-  if (pixelCount <= 0) return false;
-
-  let outOfRange = 0;
-  if (mode === "perChannel") {
-    const b = toRGB(black, 0);
-    const w = toRGB(white, 255);
-    const bR = b[0];
-    const bG = b[1];
-    const bB = b[2];
-    const wR = w[0];
-    const wG = w[1];
-    const wB = w[2];
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const bch = data[i + 2];
-      if (r < bR || r > wR || g < bG || g > wG || bch < bB || bch > wB) {
-        outOfRange++;
-      }
-    }
-  } else {
-    const b = toScalar(black, 0);
-    const w = toScalar(white, 255);
-    for (let i = 0; i < data.length; i += 4) {
-      const y = luma709(data[i], data[i + 1], data[i + 2]);
-      if (y < b || y > w) outOfRange++;
-    }
-  }
-
-  return outOfRange / pixelCount >= autoThreshold;
-};
-
-const applyLevelCompression = (
-  image: ImageDataLike,
-  options: LevelCompressionOptions
-) => {
-  const mode: LevelCompressionMode = options.mode ?? "perChannel";
-  if (mode === "off") return;
-
-  const auto = options.auto === true;
-  const autoThreshold =
-    typeof options.autoThreshold === "number" ? options.autoThreshold : 0.01;
-
-  if (auto) {
-    const enabled = shouldEnableLevelCompression(
-      image,
-      mode,
-      options.black,
-      options.white,
-      autoThreshold
-    );
-    if (!enabled) return;
-  }
-
-  const data = image.data;
-  if (mode === "perChannel") {
-    const black = toRGB(options.black, 0);
-    const white = toRGB(options.white, 255);
-
-    const bR = black[0];
-    const bG = black[1];
-    const bB = black[2];
-    const wR = white[0];
-    const wG = white[1];
-    const wB = white[2];
-
-    const dR = wR - bR;
-    const dG = wG - bG;
-    const dB = wB - bB;
-    if (dR <= 0 || dG <= 0 || dB <= 0) return;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      // Map [0..255] -> [black..white] to keep output within the display's usable range.
-      data[i] = clampByte(bR + (r * dR) / 255);
-      data[i + 1] = clampByte(bG + (g * dG) / 255);
-      data[i + 2] = clampByte(bB + (b * dB) / 255);
-    }
-    return;
-  }
-
-  // mode === 'luma'
-  const blackL = toScalar(options.black, 0);
-  const whiteL = toScalar(options.white, 255);
-  const dL = whiteL - blackL;
-  if (dL <= 0) return;
-
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const y = luma709(r, g, b);
-
-    // Map [0..255] -> [black..white]
-    const yNew = blackL + (y * dL) / 255;
-    let ratio = y > 0 ? yNew / y : 0;
-
-    // Prevent overflow clipping by capping the ratio based on the brightest channel.
-    const maxChannel = Math.max(r, g, b);
-    if (maxChannel > 0) {
-      ratio = Math.min(ratio, 255 / maxChannel);
-    }
-
-    data[i] = clampByte(r * ratio);
-    data[i + 1] = clampByte(g * ratio);
-    data[i + 2] = clampByte(b * ratio);
-  }
 };
 
 interface WhitePreservationPlan {
@@ -388,14 +297,24 @@ interface WhitePreservationPlan {
   targetWhiteLuma: number;
 }
 
-const getPercentile = (values: number[], percentile: number) => {
-  if (!values.length) return 0;
-  const sorted = values.slice().sort((a, b) => a - b);
-  const index = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.round((sorted.length - 1) * percentile))
+const getBytePercentileFromHistogram = (
+  histogram: Uint32Array,
+  count: number,
+  percentile: number
+) => {
+  if (count <= 0) return 0;
+
+  const target = Math.min(
+    count - 1,
+    Math.max(0, Math.round((count - 1) * percentile))
   );
-  return sorted[index];
+  let seen = 0;
+  for (let value = 0; value < histogram.length; value += 1) {
+    seen += histogram[value];
+    if (seen > target) return value;
+  }
+
+  return 255;
 };
 
 const getPaletteWhite = (palette: RGB[]) => {
@@ -426,8 +345,9 @@ const getWhitePreservationPlan = (
 
   const sourceLumas = new Float64Array(pixelCount);
   const sourceWhiteCandidates = new Uint8Array(pixelCount);
-  const visibleLumas: number[] = [];
-  const whiteCandidateLumas: number[] = [];
+  const whiteCandidateHistogram = new Uint32Array(256);
+  let visibleLumaCount = 0;
+  let whiteCandidateCount = 0;
   const maxWhiteSaturation = Math.min(
     1,
     Math.max(0, rangeOptions.whitePreserveMaxSaturation ?? 0.18)
@@ -444,18 +364,20 @@ const getWhitePreservationPlan = (
     const b = data[i + 2];
     const luma = luma709(r, g, b);
     sourceLumas[pixelIndex] = luma;
-    visibleLumas.push(luma);
+    visibleLumaCount += 1;
 
     if (getSaturationFromChannels(r, g, b) <= maxWhiteSaturation) {
       sourceWhiteCandidates[pixelIndex] = 1;
-      whiteCandidateLumas.push(luma);
+      whiteCandidateHistogram[clampByte(luma)] += 1;
+      whiteCandidateCount += 1;
     }
   }
 
-  if (!visibleLumas.length || !whiteCandidateLumas.length) return null;
+  if (visibleLumaCount === 0 || whiteCandidateCount === 0) return null;
 
-  const sourceWhiteLuma = getPercentile(
-    whiteCandidateLumas,
+  const sourceWhiteLuma = getBytePercentileFromHistogram(
+    whiteCandidateHistogram,
+    whiteCandidateCount,
     rangeOptions.whitePreservePercentile ?? 0.99
   );
   if (sourceWhiteLuma < (rangeOptions.whitePreserveMinLuma ?? 150)) {
@@ -501,6 +423,7 @@ const mergeImageProcessingOptions = (
   options: DitherImageOptions & typeof defaultOptions
 ): ImageProcessingOptions | undefined => {
   const hasToneMapping = options.toneMapping !== undefined;
+  const hasLevelCompression = options.levelCompression !== undefined;
   const hasClarity = options.clarity !== undefined;
   const hasPaperNormalization = options.paperNormalization !== undefined;
   const hasDynamicRangeCompression =
@@ -510,16 +433,30 @@ const mergeImageProcessingOptions = (
     !hasPaperNormalization &&
     !hasClarity &&
     !hasToneMapping &&
+    !hasLevelCompression &&
     !hasDynamicRangeCompression
   ) {
     return undefined;
   }
 
+  const previewMode = options.preview?.mode ?? "final";
+  const dynamicRangeCompression =
+    previewMode === "fast" &&
+    options.dynamicRangeCompression &&
+    options.dynamicRangeCompression !== true
+      ? {
+          ...options.dynamicRangeCompression,
+          quality: options.dynamicRangeCompression.quality ?? "fast",
+        }
+      : options.dynamicRangeCompression;
+
   return {
     paperNormalization: options.paperNormalization,
     clarity: options.clarity,
     toneMapping: options.toneMapping,
-    dynamicRangeCompression: options.dynamicRangeCompression,
+    dynamicRangeCompression,
+    levelCompression: options.levelCompression,
+    previewMode,
   };
 };
 
@@ -581,10 +518,6 @@ const applyImageAdjustmentsToImageData = (
   );
 
   applyImageProcessing(image, mergeImageProcessingOptions(options), colorPalette);
-
-  if (options.levelCompression) {
-    applyLevelCompression(image, options.levelCompression);
-  }
 
   applyWhitePreservation(image, whitePreservationPlan);
 };
@@ -745,6 +678,46 @@ const applyImageDataAdjustments = (
   applyImageAdjustmentsToImageData(image, options, colorPalette);
 
   return image;
+};
+
+const applyImageDataAdjustmentsAsync = async (
+  image: ImageDataLike,
+  opts: DitherImageOptions = {}
+): Promise<ImageDataLike | undefined> => {
+  if (!image) return;
+
+  const previewImage = getPreviewImageData(image, opts.preview, "final");
+  const workerOptions = getResolvedDitherOptions(opts);
+  if (shouldUseAdjustmentWorker(workerOptions, previewImage)) {
+    return applyImageDataAdjustmentsInWorker(previewImage, opts);
+  }
+
+  await waitForAdjustmentTurn();
+
+  return applyImageDataAdjustments(previewImage, opts);
+};
+
+const applyImageAdjustmentsPreview = async (
+  sourceCanvas: CanvasLike,
+  canvas: CanvasLike,
+  opts: DitherImageOptions = {}
+): Promise<CanvasLike | undefined> => {
+  if (!sourceCanvas || !canvas) return;
+
+  const image = getCanvasImageData(sourceCanvas);
+  if (!image) return;
+
+  const previewImage = getPreviewImageData(image, opts.preview, "fast");
+  const adjusted = await applyImageDataAdjustmentsAsync(previewImage, {
+    ...opts,
+    preview: {
+      ...opts.preview,
+      mode: opts.preview?.mode ?? "fast",
+    },
+  });
+  if (!adjusted) return;
+
+  return imageDataToCanvas(adjusted, canvas);
 };
 
 const ditherCanvas = async (
@@ -1689,7 +1662,9 @@ const imageDataToCanvas = (imageData: ImageDataLike, canvas: CanvasLike) => {
 
 export {
   applyImageAdjustments,
+  applyImageAdjustmentsPreview,
   applyImageDataAdjustments,
+  applyImageDataAdjustmentsAsync,
   ditherCanvas,
   ditherImage,
 };
