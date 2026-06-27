@@ -65,6 +65,12 @@ export const defaultPalette = getDefaultPalette("default");
 export const genericTwoColorEinkPalette = getDefaultPalette(
   "generic-2-color-eink"
 );
+export const genericThreeColorEinkPalette = getDefaultPalette(
+  "generic-3-color-eink"
+);
+export const genericFourColorEinkPalette = getDefaultPalette(
+  "generic-4-color-eink"
+);
 export const genericFourGrayscalePalette = getDefaultPalette(
   "generic-4-grayscale"
 );

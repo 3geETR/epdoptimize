@@ -696,6 +696,28 @@
         white-space: nowrap;
       }
 
+      .control-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        margin-top: 0.25rem;
+      }
+
+      .control-inline input[type="number"] {
+        width: 4.5rem;
+        padding: 0.3rem 0.4rem;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--panel-deep);
+        color: var(--ink);
+        font-size: 0.85rem;
+      }
+
+      .control-inline-sep {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
       .segmented-control {
         display: grid;
         grid-auto-flow: column;
@@ -1856,7 +1878,27 @@
               <option value="spectra6_31_5">
                 31.5 Inch Spectra 6 - 2560 x 1440
               </option>
+              <option value="custom">Custom…</option>
             </select>
+            <div id="customResolutionInputs" class="control-inline" hidden>
+              <input
+                id="customWidth"
+                type="number"
+                min="1"
+                max="99999"
+                placeholder="Width"
+                aria-label="Custom width"
+              />
+              <span class="control-inline-sep">×</span>
+              <input
+                id="customHeight"
+                type="number"
+                min="1"
+                max="99999"
+                placeholder="Height"
+                aria-label="Custom height"
+              />
+            </div>
           </div>
           <div class="workspace-control">
             <span id="orientationControlLabel" class="control-label">

@@ -21,6 +21,7 @@ import type {
 } from "../src";
 import {
   CUSTOM_PALETTES_STORAGE_KEY,
+  CUSTOM_RESOLUTION_KEY,
   DEFAULT_DITHER_OPTIONS,
   PALETTE_OPTIONS,
 } from "./demo/constants";
@@ -103,6 +104,9 @@ import {
   savePaletteButton,
   saturationInput,
   screenResolutionSelect,
+  customWidthInput,
+  customHeightInput,
+  customResolutionInputs,
   scurveStrengthInput,
   serpentineCheckbox,
   shadowBoostInput,
@@ -2381,6 +2385,8 @@ const controls = [
   dynamicRangeStrengthInput,
   lowPercentileInput,
   highPercentileInput,
+  customWidthInput,
+  customHeightInput,
 ];
 
 controls.forEach((el) => {
@@ -2470,6 +2476,10 @@ configTabButtons.forEach((button) => {
 [screenResolutionSelect, orientationSelect, imageFitSelect].forEach(
   (select) => {
     select.addEventListener("change", () => {
+      if (select === screenResolutionSelect) {
+        customResolutionInputs.hidden =
+          screenResolutionSelect.value !== CUSTOM_RESOLUTION_KEY;
+      }
       syncWorkspaceToggleControls();
       saveDeviceTestConfig();
       setDeviceTestStatus("");
@@ -2483,6 +2493,14 @@ configTabButtons.forEach((button) => {
   input.addEventListener("input", () => {
     saveDeviceTestConfig();
     setDeviceTestStatus("");
+  });
+});
+
+[customWidthInput, customHeightInput].forEach((input) => {
+  input.addEventListener("input", () => {
+    saveDeviceTestConfig();
+    setDeviceTestStatus("");
+    scheduleProcessImage();
   });
 });
 

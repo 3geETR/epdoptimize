@@ -3,7 +3,9 @@ import {
   aitjcizeSpectra6Palette,
   defaultPalette,
   gameboyPalette,
+  genericFourColorEinkPalette,
   genericFourGrayscalePalette,
+  genericThreeColorEinkPalette,
   genericTwoColorEinkPalette,
   spectra6BoeberPalette,
   spectra6OriginalPalette,
@@ -17,6 +19,7 @@ import type { ImageFitMode, ScreenOrientation } from "./types";
 export const DEVICE_TEST_STORAGE_KEY = "epdoptimize:device-test";
 export const AUTO_RATING_STORAGE_KEY = "epdoptimize:auto-ratings:v1";
 export const CUSTOM_PALETTES_STORAGE_KEY = "epdoptimize:custom-palettes:v1";
+export const CUSTOM_RESOLUTION_KEY = "custom";
 
 export const SCREEN_RESOLUTIONS = {
   spectra6_1_54: {
@@ -135,6 +138,16 @@ export const PALETTE_OPTIONS = {
     label: "2 Color eInk (generic)",
     exportName: "genericTwoColorEinkPalette",
     palette: genericTwoColorEinkPalette,
+  },
+  "generic-3-color-eink": {
+    label: "3 Color eInk (generic) BWR",
+    exportName: "genericThreeColorEinkPalette",
+    palette: genericThreeColorEinkPalette,
+  },
+  "generic-4-color-eink": {
+    label: "4 Color eInk (generic) BWRY",
+    exportName: "genericFourColorEinkPalette",
+    palette: genericFourColorEinkPalette,
   },
   "generic-4-grayscale": {
     label: "4 Grayscale (generic)",

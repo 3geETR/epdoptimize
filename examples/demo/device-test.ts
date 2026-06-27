@@ -1,10 +1,14 @@
 import {
+  CUSTOM_RESOLUTION_KEY,
   DEFAULT_DEVICE_TEST_CONFIG,
   DEVICE_TEST_STORAGE_KEY,
   SCREEN_RESOLUTIONS,
 } from "./constants";
 import {
   apiKeyInput,
+  customHeightInput,
+  customResolutionInputs,
+  customWidthInput,
   deviceColorsCanvas,
   deviceTestStatus,
   imageFitSelect,
@@ -17,20 +21,33 @@ import {
 import type { ImageFitMode, ScreenOrientation } from "./types";
 
 export function getDeviceTestConfig() {
+  const screenResolution = screenResolutionSelect.value;
   return {
-    screenResolution: screenResolutionSelect.value,
+    screenResolution,
     orientation: getSelectedOrientation(),
     imageFit: getSelectedImageFit(),
     paperId: paperIdInput.value.trim(),
     apiKey: apiKeyInput.value.trim(),
+    customWidth: screenResolution === CUSTOM_RESOLUTION_KEY ? customWidthInput.value : "",
+    customHeight: screenResolution === CUSTOM_RESOLUTION_KEY ? customHeightInput.value : "",
   };
 }
 
 export function getSelectedScreenResolution() {
+  const value = screenResolutionSelect.value;
+  if (value === CUSTOM_RESOLUTION_KEY) {
+    const w = parseInt(customWidthInput.value, 10);
+    const h = parseInt(customHeightInput.value, 10);
+    return {
+      name: "custom",
+      label: "Custom",
+      width: Number.isFinite(w) && w > 0 ? w : 800,
+      height: Number.isFinite(h) && h > 0 ? h : 480,
+    };
+  }
   return (
-    SCREEN_RESOLUTIONS[
-      screenResolutionSelect.value as keyof typeof SCREEN_RESOLUTIONS
-    ] ?? SCREEN_RESOLUTIONS.openpaper7
+    SCREEN_RESOLUTIONS[value as keyof typeof SCREEN_RESOLUTIONS] ??
+    SCREEN_RESOLUTIONS.openpaper7
   );
 }
 
@@ -63,11 +80,18 @@ export function loadDeviceTestConfig() {
     const saved = JSON.parse(
       localStorage.getItem(DEVICE_TEST_STORAGE_KEY) || "{}",
     );
-    screenResolutionSelect.value =
+    const resolution =
       typeof saved.screenResolution === "string" &&
-      saved.screenResolution in SCREEN_RESOLUTIONS
+      (saved.screenResolution in SCREEN_RESOLUTIONS ||
+        saved.screenResolution === CUSTOM_RESOLUTION_KEY)
         ? saved.screenResolution
         : DEFAULT_DEVICE_TEST_CONFIG.screenResolution;
+    screenResolutionSelect.value = resolution;
+    customResolutionInputs.hidden = resolution !== CUSTOM_RESOLUTION_KEY;
+    customWidthInput.value =
+      typeof saved.customWidth === "string" ? saved.customWidth : "";
+    customHeightInput.value =
+      typeof saved.customHeight === "string" ? saved.customHeight : "";
     orientationSelect.value =
       saved.orientation === "portrait" || saved.orientation === "original"
         ? saved.orientation
@@ -86,6 +110,9 @@ export function loadDeviceTestConfig() {
         : DEFAULT_DEVICE_TEST_CONFIG.apiKey;
   } catch {
     screenResolutionSelect.value = DEFAULT_DEVICE_TEST_CONFIG.screenResolution;
+    customResolutionInputs.hidden = true;
+    customWidthInput.value = "";
+    customHeightInput.value = "";
     orientationSelect.value = DEFAULT_DEVICE_TEST_CONFIG.orientation;
     imageFitSelect.value = DEFAULT_DEVICE_TEST_CONFIG.imageFit;
     paperIdInput.value = DEFAULT_DEVICE_TEST_CONFIG.paperId;
